@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         BUILD_DIR = "build"
-        SDK_ENV = "/home/sweetlin/Gopal/Phy_everest/tool_chain/environment-setup-aarch64-phytec-linux"
+	SDK_ENV = "/var/lib/jenkins/tool_chain/environment-setup-aarch64-phytec-linux"
     }
 
     stages {
