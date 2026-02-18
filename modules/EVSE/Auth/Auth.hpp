@@ -15,6 +15,7 @@
 #include <generated/interfaces/reservation/Implementation.hpp>
 
 // headers for required interface implementations
+#include <generated/interfaces/BinarySignal/Interface.hpp>
 #include <generated/interfaces/auth_token_provider/Interface.hpp>
 #include <generated/interfaces/auth_token_validator/Interface.hpp>
 #include <generated/interfaces/evse_manager/Interface.hpp>
@@ -47,7 +48,7 @@ public:
          std::vector<std::unique_ptr<auth_token_providerIntf>> r_token_provider,
          std::vector<std::unique_ptr<auth_token_validatorIntf>> r_token_validator,
          std::vector<std::unique_ptr<evse_managerIntf>> r_evse_manager, std::vector<std::unique_ptr<kvsIntf>> r_kvs,
-         Conf& config) :
+         std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver, Conf& config) :
         ModuleBase(info),
         p_main(std::move(p_main)),
         p_reservation(std::move(p_reservation)),
@@ -55,8 +56,8 @@ public:
         r_token_validator(std::move(r_token_validator)),
         r_evse_manager(std::move(r_evse_manager)),
         r_kvs(std::move(r_kvs)),
-        config(config) {
-    }
+        r_socket_receiver(std::move(r_socket_receiver)),
+        config(config){};
 
     const std::unique_ptr<authImplBase> p_main;
     const std::unique_ptr<reservationImplBase> p_reservation;
@@ -64,6 +65,7 @@ public:
     const std::vector<std::unique_ptr<auth_token_validatorIntf>> r_token_validator;
     const std::vector<std::unique_ptr<evse_managerIntf>> r_evse_manager;
     const std::vector<std::unique_ptr<kvsIntf>> r_kvs;
+    const std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver;
     const Conf& config;
 
     // ev@1fce4c5e-0ab8-41bb-90f7-14277703d2ac:v1
