@@ -18,6 +18,7 @@
 #include <generated/interfaces/uk_random_delay/Implementation.hpp>
 
 // headers for required interface implementations
+#include <generated/interfaces/BinarySignal/Interface.hpp>
 #include <generated/interfaces/ISO15118_charger/Interface.hpp>
 #include <generated/interfaces/ac_rcd/Interface.hpp>
 #include <generated/interfaces/connector_lock/Interface.hpp>
@@ -135,7 +136,8 @@ public:
                 std::vector<std::unique_ptr<isolation_monitorIntf>> r_imd,
                 std::vector<std::unique_ptr<over_voltage_monitorIntf>> r_over_voltage_monitor,
                 std::vector<std::unique_ptr<power_supply_DCIntf>> r_powersupply_DC,
-                std::vector<std::unique_ptr<kvsIntf>> r_store, Conf& config) :
+                std::vector<std::unique_ptr<kvsIntf>> r_store,
+                std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver, Conf& config) :
         ModuleBase(info),
         mqtt(mqtt_provider),
         telemetry(telemetry),
@@ -155,6 +157,7 @@ public:
         r_over_voltage_monitor(std::move(r_over_voltage_monitor)),
         r_powersupply_DC(std::move(r_powersupply_DC)),
         r_store(std::move(r_store)),
+        r_socket_receiver(std::move(r_socket_receiver)),
         config(config){};
 
     Everest::MqttProvider& mqtt;
@@ -175,6 +178,7 @@ public:
     const std::vector<std::unique_ptr<over_voltage_monitorIntf>> r_over_voltage_monitor;
     const std::vector<std::unique_ptr<power_supply_DCIntf>> r_powersupply_DC;
     const std::vector<std::unique_ptr<kvsIntf>> r_store;
+    const std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver;
     const Conf& config;
 
     // ev@1fce4c5e-0ab8-41bb-90f7-14277703d2ac:v1
