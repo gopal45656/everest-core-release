@@ -3,57 +3,75 @@ pipeline {
 
     environment {
         BUILD_DIR = "build"
+        SDK_ENV = "/home/sweetlin/Gopal/Phy_everest/tool_chain/environment-setup-aarch64-phytec-linux"
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Source') {
             steps {
-                echo "Checking out source code..."
                 checkout scm
             }
         }
 
-        stage('Create Build Directory') {
-            steps {
-                sh 'mkdir -p $BUILD_DIR'
-            }
-        }
-
-        stage('CMake Configure') {
+        stage('Cross Compile (Clean + Build)') {
             steps {
                 sh '''
+                    bash -c "
+                    set -e
+
+                    echo '--------------------------------------'
+                    echo 'Sourcing Yocto SDK Environment'
+                    echo '--------------------------------------'
+                    source $SDK_ENV
+
+                    echo 'Compiler being used:'
+                    echo \$CXX
+
+                    echo '--------------------------------------'
+                    echo 'Cleaning old build directory'
+                    echo '--------------------------------------'
+                    rm -rf $BUILD_DIR
+                    mkdir -p $BUILD_DIR
                     cd $BUILD_DIR
+
+                    echo '--------------------------------------'
+                    echo 'Running CMake'
+                    echo '--------------------------------------'
                     cmake ..
-                '''
-            }
-        }
 
-        stage('Build') {
-            steps {
-                sh '''
-                    cd $BUILD_DIR
-                    make
-                '''
-            }
-        }
+                    echo '--------------------------------------'
+                    echo 'Building'
+                    echo '--------------------------------------'
+                    make -j$(nproc)
 
-        stage('Install') {
-            steps {
-                sh '''
-                    cd $BUILD_DIR
+                    echo '--------------------------------------'
+                    echo 'Installing'
+                    echo '--------------------------------------'
                     make install
+
+                    echo '--------------------------------------'
+                    echo 'Verifying Binary Architecture'
+                    echo '--------------------------------------'
+                    file *
+                    "
                 '''
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts artifacts: 'build/**/*', fingerprint: true
             }
         }
     }
 
     post {
         success {
-            echo "Build completed successfully!"
+            echo 'ARM Cross Compilation Successful ✅'
         }
         failure {
-            echo "Build failed!"
+            echo 'Build Failed ❌'
         }
     }
 }
