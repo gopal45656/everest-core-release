@@ -61,7 +61,8 @@ pipeline {
 
         stage('Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'build/**/*', fingerprint: true
+                echo 'Archiving only installed artifacts from build/dist ...'
+                archiveArtifacts artifacts: 'build/dist/**', fingerprint: true
             }
         }
     }
@@ -75,3 +76,4 @@ pipeline {
         }
     }
 }
+
