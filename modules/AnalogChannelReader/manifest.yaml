@@ -1,0 +1,48 @@
+description: >
+  8 Channel Analog Reader Module (Serial Based)
+
+provides:
+  analog_reader:
+    description: Provides 8 channel analog values over serial
+    interface: analog_reader
+    config:
+      serial_port:
+        description: Serial device path (e.g. /dev/ttyUSB0)
+        type: string
+        default: "/dev/ttyUSB0"
+
+      baudrate:
+        description: Serial communication baudrate
+        type: integer
+        default: 9600
+
+      parity:
+        description: Serial parity mode (N = None, E = Even, O = Odd)
+        type: string
+        default: "N"
+
+      data_bits:
+        description: Number of data bits
+        type: integer
+        default: 8
+
+      stop_bits:
+        description: Number of stop bits
+        type: integer
+        default: 1
+
+      polling_interval_ms:
+        description: Polling interval in milliseconds
+        type: integer
+        default: 4000
+
+      reference_voltage:
+        description: ADC reference voltage used for scaling
+        type: number
+        default: 5.0
+
+metadata:
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - Saikiran
+
