@@ -1,0 +1,6 @@
+description: Binary signal interface for publishing boolean values
+ 
+vars:
+  value:
+    description: Binary value received from external process
+    type: integer

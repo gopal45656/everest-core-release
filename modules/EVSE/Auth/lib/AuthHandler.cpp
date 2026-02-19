@@ -7,6 +7,9 @@
 #include <everest/logging.hpp>
 #include <generated/interfaces/kvs/Interface.hpp>
 
+#include <thread>
+#include <chrono>
+
 using everest::helpers::is_equal_case_insensitive;
 
 namespace module {
@@ -336,6 +339,17 @@ TokenHandlingResult AuthHandler::handle_token(ProvidedIdToken& provided_token, s
                     - compare referenced_evses against the evses listed in the validation_result
                     - check if request has been withdrawn while selecting an evse
                 */
+
+                // Wait for signal to proceed with authorization
+                {
+                    if (!this->signal_ok.load()) {
+                        EVLOG_info << "Waiting for Authorization signal from SocketReceiver";
+                        while(!this->signal_ok.load()) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                        EVLOG_info << "Received Authorization signal, proceeding with authorization";
+                    }
+                }
                 const auto select_evse_result =
                     this->select_evse(referenced_evses, provided_token.id_token, lk); // might block
 
@@ -898,6 +912,11 @@ void AuthHandler::set_master_pass_group_id(const std::string& master_pass_group_
 void AuthHandler::set_prioritize_authorization_over_stopping_transaction(bool b) {
     std::lock_guard<std::mutex> lk(this->event_mutex);
     this->prioritize_authorization_over_stopping_transaction = b;
+}
+
+void AuthHandler::set_signal_ok(bool ok) {
+    this->signal_ok.store(ok);
+    EVLOG_info << "Setting signal_ok to " << ok;
 }
 
 void AuthHandler::register_notify_evse_callback(

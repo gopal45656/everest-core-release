@@ -1,0 +1,36 @@
+description: Binary Signal Receiver via Unix Domain Socket
+
+config:
+  socket_path:
+    description: Path to Unix domain (POSIX) socket used for IPC
+    type: string
+    default: "/tmp/binary_signal.sock"
+
+  socket_mode:
+    description: Socket operating mode (server or client)
+    type: string
+    default: server
+    enum:
+      - server
+      - client
+
+  reconnect_interval_ms:
+    description: Reconnect interval in milliseconds if socket connection is lost
+    type: integer
+    default: 1000
+
+provides:
+  main:
+    description: Binary signal received from external process via Unix domain socket
+    interface: BinarySignal
+    config: {}
+
+requires:
+  auth:
+    interface: auth
+
+metadata:
+  base_license: https://opensource.org/licenses/Apache-2.0
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - himanshu.p@phytecembedded.in

@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <atomic>
 
 #include <utils/types.hpp>
 
@@ -183,6 +184,14 @@ public:
     void set_prioritize_authorization_over_stopping_transaction(bool b);
 
     /**
+     * @brief Set the signal_ok flag for authorization
+     *
+     * @param ok
+     *
+     */
+    void set_signal_ok(bool ok);
+
+    /**
      * @brief Registers the given \p callback to notify the evse about the processed authorization request.
      *
      * @param callback
@@ -268,6 +277,7 @@ private:
     std::mutex event_mutex;
     std::mutex withdraw_mutex;
     std::unique_ptr<WithdrawAuthorizationRequest> withdraw_request;
+    std::atomic<bool> signal_ok = false;
 
     // callbacks
     std::function<void(const int evse_index, const ProvidedIdToken& provided_token,
