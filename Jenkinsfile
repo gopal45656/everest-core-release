@@ -42,15 +42,15 @@ pipeline {
                     echo '--------------------------------------'
                     cmake ..
 
-                    echo '--------------------------------------'
-                    echo 'Building (Incremental)'
-                    echo '--------------------------------------'
-                    make -j$(nproc)
                     else
                         echo 'Build directory exists. Reusing...'
                     fi
 
 
+                    echo '--------------------------------------'
+                    echo 'Building (Incremental)'
+                    echo '--------------------------------------'
+                    make -j$(nproc)
                     echo '--------------------------------------'
                     echo 'Installing'
                     echo '--------------------------------------'
