@@ -1,0 +1,12 @@
+description: Hello World example module
+
+provides:
+  main:
+    description: Hello service
+    interface: hello
+
+
+metadata:
+  license: "https://opensource.org/licenses/Apache-2.0"
+  authors:
+    - "Developer"
