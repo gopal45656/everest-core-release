@@ -28,24 +28,22 @@ pipeline {
                     echo 'Compiler being used:'
                     echo \$CXX
 
-		    if [ ! -d $BUILD_DIR ]; then
-                        echo 'Build directory not found. Creating...'
-                        mkdir -p $BUILD_DIR
-                        cd $BUILD_DIR
+                    echo '--------------------------------------'
+                    echo 'Cleaning old build directory'
+                    echo '--------------------------------------'
+                    rm -rf $BUILD_DIR
+                    mkdir -p $BUILD_DIR
+                    cd $BUILD_DIR
 
-		    echo '--------------------------------------'
+                    echo '--------------------------------------'
                     echo 'Running CMake'
                     echo '--------------------------------------'
                     cmake ..
 
-                    else
-                        echo 'Build directory exists. Reusing...'
-                    fi
-
-	                echo '--------------------------------------'
-                        echo 'Building'
-                        echo '--------------------------------------'
-                        make -j$(nproc)
+                    echo '--------------------------------------'
+                    echo 'Building'
+                    echo '--------------------------------------'
+                    make -j$(nproc)
 
                     echo '--------------------------------------'
                     echo 'Installing'
