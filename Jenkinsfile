@@ -35,10 +35,6 @@ pipeline {
                     if [ ! -d $BUILD_DIR ]; then
                         echo 'Build directory not found. Creating...'
                         mkdir -p $BUILD_DIR
-                    else
-                        echo 'Build directory exists. Reusing...'
-                    fi
-
                     cd $BUILD_DIR
 
                     echo '--------------------------------------'
@@ -50,6 +46,10 @@ pipeline {
                     echo 'Building (Incremental)'
                     echo '--------------------------------------'
                     make -j$(nproc)
+                    else
+                        echo 'Build directory exists. Reusing...'
+                    fi
+
 
                     echo '--------------------------------------'
                     echo 'Installing'
