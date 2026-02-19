@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         BUILD_DIR = "build"
-	SDK_ENV = "/var/lib/jenkins/tool_chain/environment-setup-aarch64-phytec-linux"
+        SDK_ENV = "/var/lib/jenkins/tool_chain/environment-setup-aarch64-phytec-linux"
     }
 
     stages {
@@ -14,7 +14,7 @@ pipeline {
             }
         }
 
-        stage('Cross Compile (Clean + Build)') {
+        stage('Cross Compile (Incremental Build)') {
             steps {
                 sh '''
                     bash -c "
@@ -29,10 +29,16 @@ pipeline {
                     echo \$CXX
 
                     echo '--------------------------------------'
-                    echo 'Cleaning old build directory'
+                    echo 'Checking build directory'
                     echo '--------------------------------------'
-                    rm -rf $BUILD_DIR
-                    mkdir -p $BUILD_DIR
+
+                    if [ ! -d $BUILD_DIR ]; then
+                        echo 'Build directory not found. Creating...'
+                        mkdir -p $BUILD_DIR
+                    else
+                        echo 'Build directory exists. Reusing...'
+                    fi
+
                     cd $BUILD_DIR
 
                     echo '--------------------------------------'
@@ -41,7 +47,7 @@ pipeline {
                     cmake ..
 
                     echo '--------------------------------------'
-                    echo 'Building'
+                    echo 'Building (Incremental)'
                     echo '--------------------------------------'
                     make -j$(nproc)
 
