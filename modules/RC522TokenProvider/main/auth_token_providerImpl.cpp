@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+// #include <set>
 
 namespace module {
 namespace main {
@@ -28,8 +29,7 @@ static speed_t to_baud(int br) {
 
 auth_token_providerImpl::~auth_token_providerImpl() {
     running_ = false;
-    q_cv_.notify_all();   // wake anyone waiting in AuthRequired path
-
+    q_cv_.notify_all();
     if (serial_thread_.joinable()) {
         serial_thread_.join();
     }
@@ -40,33 +40,25 @@ void auth_token_providerImpl::init() {
     mod->r_evse->subscribe_session_event([this](types::evse_manager::SessionEvent event) {
         if (config.mode == "serial_on_auth_required" &&
             event.event == types::evse_manager::SessionEventEnum::AuthRequired) {
-            // Wait up to timeout seconds for a token to show up in queue
-            // EVLOG_info << "Auth Required: Waiting upto " << config.timeout << "s for token...";
-            EVLOG_info << "AuthRequired: waiting " << (config.timeout <= 0 ? "indefinitely" : ("up to " + std::to_string((int)config.timeout) + "s"))<< " for a token...";
+
+            EVLOG_info << "AuthRequired: waiting "
+                    << (config.timeout <= 0 ? "indefinitely"
+                                            : ("up to " + std::to_string(static_cast<int>(config.timeout)) + "s"))
+                    << " for a token...";
 
             std::unique_lock<std::mutex> lk(q_mtx_);
-
             bool got = false;
-            // bool got = q_cv_.wait_for(
-            //     lk, std::chrono::seconds(static_cast<int>(config.timeout)),
-            //     [this] { return !token_queue_.empty(); });
-
-            // if (got) {
-            //     std::string token = std::move(token_queue_.front());
-            //     token_queue_.pop();
-            //     lk.unlock();
-            //     publish_token_string(token);
-            // } else {
-            //     EVLOG_warning << "No token received from serial within timeout " << config.timeout << "s";
-            // }
 
             if (config.timeout <= 0) {
-                // ❗ Infinite wait until token arrives or module is shutting down
+                // Infinite wait until token arrives or module is shutting down
                 q_cv_.wait(lk, [this] { return !token_queue_.empty() || !running_; });
                 got = !token_queue_.empty();
             } else {
-                // ⏳ Finite wait for timeout seconds
-                got = q_cv_.wait_for(lk, std::chrono::seconds(static_cast<int>(config.timeout)), [this] { return !token_queue_.empty(); });
+                // Finite wait
+                got = q_cv_.wait_for(
+                    lk,
+                    std::chrono::seconds(static_cast<int>(config.timeout)),
+                    [this] { return !token_queue_.empty(); });
             }
 
             if (!running_) {
@@ -80,24 +72,23 @@ void auth_token_providerImpl::init() {
                 lk.unlock();
                 publish_token_string(token);
             } else {
-                EVLOG_warn << "No token received from serial within timeout " << (int)config.timeout << "s";
+                EVLOG_warning << "No token received from serial within timeout "
+                        << static_cast<int>(config.timeout) << "s";
             }
-    }
-
         }
 
-        // (Optional) Keep dummy SessionStarted behavior if you want compatibility:
+        // (Optional) dummy fallback if you still keep it:
         if (config.mode == "dummy" &&
             event.event == types::evse_manager::SessionEventEnum::SessionStarted) {
             types::authorization::ProvidedIdToken token;
             token.id_token = {config.token, types::authorization::IdTokenType::ISO14443};
             token.authorization_type = types::authorization::string_to_authorization_type(config.type);
             if (config.connector_id > 0) {
-                token.connectors.emplace(std::initializer_list<int>{config.connector_id});
-            }
+                // See connector fix below
+                token.connectors = std::vector<int>{config.connector_id};            }
             token.parent_id_token = {config.token, types::authorization::IdTokenType::ISO14443};
-            EVLOG_info << "Publishing dummy token: " << everest::helpers::redact(token);
-            publish_provided_token(token);
+            EVLOG_info << "Publishing dummy token.";
+            this->publish_provided_token(token);
         }
     });
 
@@ -292,7 +283,7 @@ void auth_token_providerImpl::publish_token_string(const std::string& token_str)
     token.authorization_type = types::authorization::string_to_authorization_type(config.type);
 
     if (config.connector_id > 0) {
-        token.connectors.emplace(std::initializer_list<int>{config.connector_id});
+        token.connectors = std::vector<int>{config.connector_id};
     }
 
     token.parent_id_token = {token_str, types::authorization::IdTokenType::ISO14443};
