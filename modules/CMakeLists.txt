@@ -8,6 +8,6 @@ add_subdirectory(HardwareDrivers)
 add_subdirectory(Misc)
 add_subdirectory(Simulation)
 add_subdirectory(Testing)
-
+ev_add_module(AnalogChannelReader)
 ev_add_module(SocketReceiver)
 ev_add_module(RC522TokenProvider)
