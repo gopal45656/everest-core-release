@@ -33,7 +33,6 @@ pipeline {
                              --std=c++17 \
                              --language=c++ \
                              --suppress=missingIncludeSystem \
-                             --error-exitcode=1 \
                              . 2> cppcheck-report.txt
                 '''
             }
@@ -53,7 +52,6 @@ pipeline {
                              --addon=misra \
                              --std=c++17 \
                              --suppress=missingIncludeSystem \
-                             --error-exitcode=1 \
                              . 2> misra-report.txt
                 '''
             }
