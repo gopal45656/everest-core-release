@@ -14,7 +14,7 @@ pipeline {
             }
         }
 
-        stage('Cross Compile (Clean + Build)') {
+        stage('Cross Compile (Incremental Build)') {
             steps {
                 sh '''
                     bash -c "
@@ -28,20 +28,24 @@ pipeline {
                     echo 'Compiler being used:'
                     echo \$CXX
 
-                    echo '--------------------------------------'
-                    echo 'Cleaning old build directory'
-                    echo '--------------------------------------'
-                    rm -rf $BUILD_DIR
-                    mkdir -p $BUILD_DIR
+                    # Create build directory if it doesn't exist
+                    if [ ! -d $BUILD_DIR ]; then
+                        echo 'Build directory not found, creating...'
+                        mkdir -p $BUILD_DIR
+                    fi
+
                     cd $BUILD_DIR
 
-                    echo '--------------------------------------'
-                    echo 'Running CMake'
-                    echo '--------------------------------------'
-                    cmake ..
+                    # Check if CMake needs to rerun
+                    if [ ! -f Makefile ] || [ ../CMakeLists.txt -nt Makefile ]; then
+                        echo 'CMake needs to run (Makefile missing or CMakeLists.txt changed)...'
+                        cmake ..
+                    else
+                        echo 'Skipping CMake (up-to-date)'
+                    fi
 
                     echo '--------------------------------------'
-                    echo 'Building'
+                    echo 'Building (Incremental)'
                     echo '--------------------------------------'
                     make -j$(nproc)
 
@@ -61,7 +65,7 @@ pipeline {
 
         stage('Archive Artifacts') {
             steps {
-                echo 'Archiving only installed artifacts from build/dist ...'
+		echo 'Archiving only installed artifacts from build/dist ...'
                 archiveArtifacts artifacts: 'build/dist/**', fingerprint: true
             }
         }
@@ -76,4 +80,3 @@ pipeline {
         }
     }
 }
-
