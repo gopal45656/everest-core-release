@@ -1,0 +1,88 @@
+description: >
+  Token provider that can read tokens from an RC522 (or similar) serial reader and publish them to the auth_token_provider interface.
+provides:
+  main:
+    description: Reads tokens from a serial device and publishes ProvidedIdToken.
+    interface: auth_token_provider
+    config:
+      # Keep a dummy token as fallback or for testing
+      token:
+        description: Dummy token string to return (used in 'dummy' mode or as fallback)
+        type: string
+        minLength: 1
+        maxLength: 20
+        default: DEADBEEF
+
+      type:
+        description: Authorization type (maps to AuthorizationType)
+        type: string
+        minLength: 2
+        maxLength: 32
+        default: RFID
+
+      timeout:
+        description: Time our token is valid (s), or wait time for serial in 'serial_on_auth_required'
+        type: number
+        minimum: 0
+        maximum: 120
+        default: 0
+
+      connector_id:
+        description: If >0, the generated token is only valid for this connector_id
+        type: integer
+        minimum: 0
+        default: 0
+
+      # --- Serial-related fields ---
+      mode:
+        description: "'dummy', 'serial_push', or 'serial_on_auth_required'"
+        type: string
+        enum: [dummy, serial_push, serial_on_auth_required]
+        default: serial_push
+
+      serial_device:
+        description: Serial device path (e.g., /dev/ttyUSB0 or /dev/ttyACM0)
+        type: string
+        default: ""
+
+      baudrate:
+        description: Serial baudrate
+        type: integer
+        enum: [9600, 19200, 38400, 57600, 115200]
+        default: 9600
+
+      data_bits:
+        description: Data bits (5..8)
+        type: integer
+        minimum: 5
+        maximum: 8
+        default: 8
+
+      parity:
+        description: Parity (none|even|odd)
+        type: string
+        enum: [none, even, odd]
+        default: none
+
+      stop_bits:
+        description: Stop bits (1|2)
+        type: integer
+        enum: [1, 2]
+        default: 1
+
+      line_delimiter:
+        description: Line delimiter that ends one token frame (e.g., \n)
+        type: string
+        default: "\n"
+
+      token_regex:
+        description: Regex to extract token from a received line (first capture group is used)
+        type: string
+        default: "([0-9A-Fa-f]+)"
+requires:
+  evse:
+    interface: evse_manager
+metadata:
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - Himanshu Panigrahy
