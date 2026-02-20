@@ -1,0 +1,13 @@
+description: Interface for 8 channel analog input over serial
+
+vars:
+  channel_values:
+    description: Array containing 8 analog channel values
+    type: array
+    items:
+      type: number
+
+cmds: {}
+
+errors: []
+
