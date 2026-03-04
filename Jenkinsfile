@@ -16,9 +16,6 @@ pipeline {
 
         stage('Cross Compile (Incremental Build)') {
             steps {
-                    echo '--------------------------------------'
-                    echo 'WellCome to the CI/CD'
-                    echo '--------------------------------------'
                 sh '''
                     bash -c "
                     set -e
