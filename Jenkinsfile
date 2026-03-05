@@ -29,9 +29,9 @@ pipeline {
                     echo \$CXX
 
                     # Create build directory if it doesn't exist
-                        mkdir -p $BUILD_DIR
-                    	cd $BUILD_DIR
-                        cmake ..
+                    mkdir -p $BUILD_DIR
+                    cd $BUILD_DIR
+                    cmake ..
 
                     echo '--------------------------------------'
                     echo 'Building (Incremental)'
