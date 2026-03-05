@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         BUILD_DIR = "build"
-	SDK_ENV = "/var/lib/jenkins/tool_chain/environment-setup-aarch64-phytec-linux"
+	SDK_ENV = "/home/sweetlin/jenkins/tool_chain/environment-setup-aarch64-phytec-linux"
     }
 
     stages {
@@ -16,9 +16,6 @@ pipeline {
 
         stage('Cross Compile (Incremental Build)') {
             steps {
-                    echo '--------------------------------------'
-                    echo 'WellCome to the CI/CD'
-                    echo '--------------------------------------'
                 sh '''
                     bash -c "
                     set -e
