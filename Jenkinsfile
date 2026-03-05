@@ -29,20 +29,9 @@ pipeline {
                     echo \$CXX
 
                     # Create build directory if it doesn't exist
-                    if [ ! -d $BUILD_DIR ]; then
-                        echo 'Build directory not found, creating...'
                         mkdir -p $BUILD_DIR
                     	cd $BUILD_DIR
                         cmake ..
-                    fi
-
-
-                    # Check if CMake needs to rerun
-                    if [ ! -f Makefile ] || [ ../CMakeLists.txt -nt Makefile ]; then
-                        echo 'CMake needs to run (Makefile missing or CMakeLists.txt changed)...'
-                    else
-                        echo 'Skipping CMake (up-to-date)'
-                    fi
 
                     echo '--------------------------------------'
                     echo 'Building (Incremental)'
