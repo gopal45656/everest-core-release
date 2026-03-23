@@ -13,7 +13,7 @@ pipeline {
         BUILD_DIR  = "${WORKSPACE}/build"
         DIST_DIR   = "${WORKSPACE}/build/dist"
         SDK_ENV    = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
-        PROJECT    = "Phytec_EVSE"
+        PROJECT    = "Phy_EVSE"
     }
 
     stages {
