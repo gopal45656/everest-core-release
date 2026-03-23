@@ -39,7 +39,7 @@ pipeline {
                     echo " Sourcing Yocto SDK Environment"
                     echo "======================================"
 
-                    source "${SDK_ENV}"
+                    . "${SDK_ENV}"
 
                     # ✅ Fix PATH for EDM
                     export PATH=$HOME/.local/bin:$PATH
