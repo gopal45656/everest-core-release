@@ -1,154 +1,131 @@
 pipeline {
     agent any
 
-    parameters {
-        booleanParam(
-            name: 'CLEAN_BUILD',
-            defaultValue: false,
-            description: 'Delete build directory before compiling (full rebuild)'
-        )
-    }
-
     environment {
-        BUILD_DIR  = "${WORKSPACE}/build"
-        DIST_DIR   = "${WORKSPACE}/build/dist"
-        SDK_ENV    = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
-        PROJECT    = "PhyTest_EVSE"
+        WORKSPACE_DIR = "${WORKSPACE}"
+        BUILD_DIR = "${WORKSPACE}/build"
+        INSTALL_DIR = "${WORKSPACE}/build/dist"
+        SDK_ENV = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
     }
 
     stages {
 
-        // ----------------------------------------------------------------
-        // Stage 1: Checkout
-        // ----------------------------------------------------------------
-        stage('Checkout Source') {
+        stage('Checkout SCM') {
             steps {
                 checkout scm
-                sh 'echo "Branch: ${GIT_BRANCH} | Commit: ${GIT_COMMIT}"'
+                sh '''
+                    echo "Branch: ${GIT_BRANCH} | Commit: ${GIT_COMMIT}"
+                '''
             }
         }
 
-        // ----------------------------------------------------------------
-        // Stage 2: Optional clean
-        // ----------------------------------------------------------------
         stage('Clean') {
-            when {
-                expression { return params.CLEAN_BUILD == true }
-            }
             steps {
                 sh '''
                     echo "--------------------------------------"
-                    echo "Clean Build Requested — removing ${BUILD_DIR}"
+                    echo "Clean Build Requested — removing build directory"
                     echo "--------------------------------------"
                     rm -rf "${BUILD_DIR}"
                 '''
             }
         }
 
-        // ----------------------------------------------------------------
-        // Stage 3: Cross-compile
-        // ----------------------------------------------------------------
         stage('Cross Compile') {
             steps {
                 sh '''
-                    bash -c "
                     set -e
 
-                    echo '======================================'
-                    echo ' Sourcing Yocto SDK Environment'
-                    echo '======================================'
-                    source \\"${SDK_ENV}\\"
-		    export PATH=$HOME/.local/bin:$PATH
+                    echo "======================================"
+                    echo " Sourcing Yocto SDK Environment"
+                    echo "======================================"
 
-		    echo "Checking EDM..."
-		    which edm || { echo "EDM NOT FOUND"; exit 1; }
+                    source "${SDK_ENV}"
 
-                    echo ''
-                    echo 'Toolchain info:'
-                    echo '  CC  = '\$CC
-                    echo '  CXX = '\$CXX
-                    echo '  LD  = '\$LD
-                    echo '  SYSROOT = '\$SDKTARGETSYSROOT
-                    echo ''
+                    # ✅ Fix PATH for EDM
+                    export PATH=$HOME/.local/bin:$PATH
 
-                    # ---- Create build directory -------------------------
-                    mkdir -p \\"${BUILD_DIR}\\"
-                    cd \\"${BUILD_DIR}\\"
-
-                    # ---- Run CMake only when needed ---------------------
-                    if [ ! -f CMakeCache.txt ] || [ ../CMakeLists.txt -nt CMakeCache.txt ]; then
-                        echo '--------------------------------------'
-                        echo ' Running CMake configure'
-                        echo '--------------------------------------'
-                        cmake .. \\\\
-                            -DCMAKE_INSTALL_PREFIX=\\"${DIST_DIR}\\" \\\\
-                            -DCMAKE_BUILD_TYPE=Release
-                    else
-                        echo 'CMake already configured — skipping'
+                    echo ""
+                    echo "Checking EDM..."
+                    if ! command -v edm >/dev/null 2>&1; then
+                        echo "❌ EDM NOT FOUND"
+                        exit 1
                     fi
+                    which edm
 
-                    echo ''
-                    echo '--------------------------------------'
-                    echo ' Building ${PROJECT} (Incremental)'
-                    echo '--------------------------------------'
-                    make -j\$(nproc)
+                    echo ""
+                    echo "Toolchain info:"
+                    echo "  CC  = $CC"
+                    echo "  CXX = $CXX"
+                    echo "  LD  = $LD"
+                    echo "  SYSROOT = $SDKTARGETSYSROOT"
+                    echo ""
 
-                    echo ''
-                    echo '--------------------------------------'
-                    echo ' Installing to \${DIST_DIR}'
-                    echo '--------------------------------------'
+                    echo "--------------------------------------"
+                    echo " Creating Build Directory"
+                    echo "--------------------------------------"
+                    mkdir -p "${BUILD_DIR}"
+                    cd "${BUILD_DIR}"
+
+                    echo "--------------------------------------"
+                    echo " Running CMake configure"
+                    echo "--------------------------------------"
+                    cmake .. \
+                        -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
+                        -DCMAKE_BUILD_TYPE=Release
+
+                    echo ""
+                    echo "--------------------------------------"
+                    echo " Building PhyTest_EVSE"
+                    echo "--------------------------------------"
+                    make -j$(nproc)
+
+                    echo ""
+                    echo "--------------------------------------"
+                    echo " Installing"
+                    echo "--------------------------------------"
                     make install
 
-                    echo ''
-                    echo '--------------------------------------'
-                    echo ' Verifying Binary Architecture'
-                    echo '--------------------------------------'
-                    find \\"${DIST_DIR}\\" -type f | xargs file 2>/dev/null || true
-                    "
+                    echo ""
+                    echo "--------------------------------------"
+                    echo " Verifying Binary Architecture"
+                    echo "--------------------------------------"
+                    if [ -d "${INSTALL_DIR}" ]; then
+                        find "${INSTALL_DIR}" -type f | xargs file 2>/dev/null || true
+                    else
+                        echo "⚠️ Install directory not found"
+                        exit 1
+                    fi
                 '''
             }
         }
 
-        // ----------------------------------------------------------------
-        // Stage 4: Archive artifacts
-        // ----------------------------------------------------------------
         stage('Archive Artifacts') {
             steps {
-                sh 'echo "Archiving artifacts from: ${DIST_DIR}"'
-                archiveArtifacts(
-                    artifacts: 'build/**',
-                    fingerprint: true,
-                    allowEmptyArchive: false
-                )
+                sh '''
+                    echo "Archiving artifacts from: ${INSTALL_DIR}"
+                    ls -l ${INSTALL_DIR} || echo "No files found"
+                '''
+                archiveArtifacts artifacts: 'build/dist/**', allowEmptyArchive: false
             }
         }
     }
 
-    // ----------------------------------------------------------------
-    // Post actions
-    // ----------------------------------------------------------------
     post {
         success {
             echo "======================================"
-            echo " ${PROJECT} Cross Compilation Successful"
-            echo " Build : ${env.BUILD_NUMBER}"
-            echo " Branch: ${env.GIT_BRANCH}"
+            echo " PhyTest_EVSE Build SUCCESS"
+            echo " Build : ${BUILD_NUMBER}"
+            echo " Branch: ${GIT_BRANCH}"
             echo "======================================"
         }
+
         failure {
             echo "======================================"
-            echo " ${PROJECT} Build FAILED"
-            echo " Build : ${env.BUILD_NUMBER}"
-            echo " Branch: ${env.GIT_BRANCH}"
-            echo " Logs  : ${env.BUILD_URL}console"
+            echo " PhyTest_EVSE Build FAILED"
+            echo " Build : ${BUILD_NUMBER}"
+            echo " Branch: ${GIT_BRANCH}"
+            echo " Logs  : ${BUILD_URL}console"
             echo "======================================"
-        }
-        always {
-            cleanWs(
-                cleanWhenSuccess: false,
-                cleanWhenFailure: false,
-                cleanWhenAborted: true
-            )
         }
     }
 }
