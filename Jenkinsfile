@@ -1,111 +1,150 @@
 pipeline {
     agent any
 
+    parameters {
+        booleanParam(
+            name: 'CLEAN_BUILD',
+            defaultValue: false,
+            description: 'Delete build directory before compiling (full rebuild)'
+        )
+    }
+
     environment {
-        BUILD_DIR = "build"
-        SDK_ENV = "/home/sweetlin/Gopal/Tool_chains/Cube/environment-setup-aarch64-phytec-linux"
+        BUILD_DIR  = "${WORKSPACE}/build"
+        DIST_DIR   = "${WORKSPACE}/build/dist"
+        SDK_ENV    = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
+        PROJECT    = "Everest"
     }
 
     stages {
 
+        // ----------------------------------------------------------------
+        // Stage 1: Checkout
+        // ----------------------------------------------------------------
         stage('Checkout Source') {
             steps {
                 checkout scm
+                sh 'echo "Branch: ${GIT_BRANCH} | Commit: ${GIT_COMMIT}"'
             }
         }
 
-        stage('Cross Compile (Incremental Build)') {
+        // ----------------------------------------------------------------
+        // Stage 2: Optional clean
+        // ----------------------------------------------------------------
+        stage('Clean') {
+            when {
+                expression { return params.CLEAN_BUILD == true }
+            }
             steps {
                 sh '''
-                set -e
-
-                echo "--------------------------------------"
-                echo "Cleaning conflicting environment"
-                echo "--------------------------------------"
-
-                unset CC
-                unset CXX
-                unset CPP
-                unset LD
-                unset AR
-                unset STRIP
-                unset CFLAGS
-                unset CXXFLAGS
-                unset LDFLAGS
-
-                echo "--------------------------------------"
-                echo "Sourcing Yocto SDK Environment"
-                echo "--------------------------------------"
-
-                source $SDK_ENV
-
-                echo "Compiler being used:"
-                echo $CC
-                echo $CXX
-                which $CXX
-
-                echo "SYSROOT:"
-                echo $SDKTARGETSYSROOT
-
-                echo "--------------------------------------"
-                echo "Preparing Build Directory"
-                echo "--------------------------------------"
-
-                if [ ! -d $BUILD_DIR ]; then
-                    mkdir -p $BUILD_DIR
-                fi
-
-                cd $BUILD_DIR
-
-                echo "--------------------------------------"
-                echo "Running CMake if required"
-                echo "--------------------------------------"
-
-                if [ ! -f Makefile ] || [ ../CMakeLists.txt -nt Makefile ]; then
-                    cmake .. \
-                        -DCMAKE_SYSROOT=$SDKTARGETSYSROOT \
-                        -DCMAKE_FIND_ROOT_PATH=$SDKTARGETSYSROOT \
-                        -DCMAKE_C_COMPILER=$CC \
-                        -DCMAKE_CXX_COMPILER=$CXX
-                else
-                    echo "Skipping CMake (Incremental Build)"
-                fi
-
-                echo "--------------------------------------"
-                echo "Building"
-                echo "--------------------------------------"
-
-                make -j$(nproc)
-
-                echo "--------------------------------------"
-                echo "Installing"
-                echo "--------------------------------------"
-
-                make install
-
-                echo "--------------------------------------"
-                echo "Verifying Binary Architecture"
-                echo "--------------------------------------"
-
-                file *
+                    echo "--------------------------------------"
+                    echo "Clean Build Requested — removing ${BUILD_DIR}"
+                    echo "--------------------------------------"
+                    rm -rf "${BUILD_DIR}"
                 '''
             }
         }
 
+        // ----------------------------------------------------------------
+        // Stage 3: Cross-compile
+        // ----------------------------------------------------------------
+        stage('Cross Compile') {
+            steps {
+                sh '''
+                    bash -c "
+                    set -e
+
+                    echo '======================================'
+                    echo ' Sourcing Yocto SDK Environment'
+                    echo '======================================'
+                    source \\"${SDK_ENV}\\"
+
+                    echo ''
+                    echo 'Toolchain info:'
+                    echo '  CC  = '\$CC
+                    echo '  CXX = '\$CXX
+                    echo '  LD  = '\$LD
+                    echo '  SYSROOT = '\$SDKTARGETSYSROOT
+                    echo ''
+
+                    # ---- Create build directory -------------------------
+                    mkdir -p \\"${BUILD_DIR}\\"
+                    cd \\"${BUILD_DIR}\\"
+
+                    # ---- Run CMake only when needed ---------------------
+                    if [ ! -f CMakeCache.txt ] || [ ../CMakeLists.txt -nt CMakeCache.txt ]; then
+                        echo '--------------------------------------'
+                        echo ' Running CMake configure'
+                        echo '--------------------------------------'
+                        cmake .. \\\\
+                            -DCMAKE_INSTALL_PREFIX=\\"${DIST_DIR}\\" \\\\
+                            -DCMAKE_BUILD_TYPE=Release
+                    else
+                        echo 'CMake already configured — skipping'
+                    fi
+
+                    echo ''
+                    echo '--------------------------------------'
+                    echo ' Building ${PROJECT} (Incremental)'
+                    echo '--------------------------------------'
+                    make -j\$(nproc)
+
+                    echo ''
+                    echo '--------------------------------------'
+                    echo ' Installing to \${DIST_DIR}'
+                    echo '--------------------------------------'
+                    make install
+
+                    echo ''
+                    echo '--------------------------------------'
+                    echo ' Verifying Binary Architecture'
+                    echo '--------------------------------------'
+                    find \\"${DIST_DIR}\\" -type f | xargs file 2>/dev/null || true
+                    "
+                '''
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Stage 4: Archive artifacts
+        // ----------------------------------------------------------------
         stage('Archive Artifacts') {
             steps {
-                echo 'Archiving only installed artifacts from build/dist ...'
-                archiveArtifacts artifacts: 'build/dist/**', fingerprint: true
+                sh 'echo "Archiving artifacts from: ${DIST_DIR}"'
+                archiveArtifacts(
+                    artifacts: 'build/dist/**',
+                    fingerprint: true,
+                    allowEmptyArchive: false
+                )
             }
         }
     }
 
+    // ----------------------------------------------------------------
+    // Post actions
+    // ----------------------------------------------------------------
     post {
         success {
-            echo 'ARM Cross Compilation Successful ✅'
+            echo "======================================"
+            echo " ${PROJECT} Cross Compilation Successful"
+            echo " Build : ${env.BUILD_NUMBER}"
+            echo " Branch: ${env.GIT_BRANCH}"
+            echo "======================================"
         }
         failure {
-            echo 'Build Failed ❌'
+            echo "======================================"
+            echo " ${PROJECT} Build FAILED"
+            echo " Build : ${env.BUILD_NUMBER}"
+            echo " Branch: ${env.GIT_BRANCH}"
+            echo " Logs  : ${env.BUILD_URL}console"
+            echo "======================================"
+        }
+        always {
+            cleanWs(
+                cleanWhenSuccess: false,
+                cleanWhenFailure: false,
+                cleanWhenAborted: true
+            )
         }
     }
 }
