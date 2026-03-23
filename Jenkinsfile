@@ -58,6 +58,10 @@ pipeline {
                     echo ' Sourcing Yocto SDK Environment'
                     echo '======================================'
                     source \\"${SDK_ENV}\\"
+		    export PATH=$HOME/.local/bin:$PATH
+
+		    echo "Checking EDM..."
+		    which edm || { echo "EDM NOT FOUND"; exit 1; }
 
                     echo ''
                     echo 'Toolchain info:'
