@@ -116,7 +116,7 @@ pipeline {
             steps {
                 sh 'echo "Archiving artifacts from: ${DIST_DIR}"'
                 archiveArtifacts(
-                    artifacts: 'build/dist/**',
+                    artifacts: 'build/**',
                     fingerprint: true,
                     allowEmptyArchive: false
                 )
