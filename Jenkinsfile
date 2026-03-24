@@ -1,11 +1,22 @@
 pipeline {
     agent any
 
+    options {
+        // Wait 10 seconds after commit to aggregate multiple pushes
+        quietPeriod(10)
+
+        // Skip older builds if a newer commit comes in
+        skipStagesAfterUnstable()
+    }
+
     environment {
         WORKSPACE_DIR = "${WORKSPACE}"
         BUILD_DIR = "${WORKSPACE}/build"
         INSTALL_DIR = "${WORKSPACE}/build/dist"
         SDK_ENV = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
+        TARGET_USER = "root"                // Replace with your target board username
+        TARGET_IP = "192.168.11.50"         // Replace with your target board IP
+        TARGET_DIR = "/home/user/PhyTest_EVSE" // Replace with target directory
     }
 
     stages {
@@ -19,82 +30,44 @@ pipeline {
             }
         }
 
-        stage('Clean') {
+        stage('Prepare Build Directory') {
             steps {
                 sh '''
-                    echo "--------------------------------------"
-                    echo "Clean Build Requested — removing build directory"
-                    echo "--------------------------------------"
-                    rm -rf "${BUILD_DIR}"
+                    echo "Checking if build directory exists"
+                    if [ ! -d "${BUILD_DIR}" ]; then
+                        echo "Build directory not found. Creating..."
+                        mkdir -p "${BUILD_DIR}"
+                        cd "${BUILD_DIR}"
+                        echo "Running CMake configure"
+                        cmake .. \
+                            -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
+                            -DCMAKE_BUILD_TYPE=Release
+                    else
+                        echo "Build directory exists, skipping CMake configuration"
+                    fi
                 '''
             }
         }
 
-        stage('Cross Compile') {
+        stage('Build & Install') {
             steps {
                 sh '''
                     set -e
-
-                    echo "======================================"
-                    echo " Sourcing Yocto SDK Environment"
-                    echo "======================================"
-
+                    echo "Sourcing Yocto SDK Environment"
                     . "${SDK_ENV}"
 
-                    # ✅ Fix PATH for EDM
                     export PATH=$HOME/.local/bin:$PATH
-
-                    echo ""
-                    echo "Checking EDM..."
                     if ! command -v edm >/dev/null 2>&1; then
                         echo "❌ EDM NOT FOUND"
                         exit 1
                     fi
                     which edm
 
-                    echo ""
-                    echo "Toolchain info:"
-                    echo "  CC  = $CC"
-                    echo "  CXX = $CXX"
-                    echo "  LD  = $LD"
-                    echo "  SYSROOT = $SDKTARGETSYSROOT"
-                    echo ""
-
-                    echo "--------------------------------------"
-                    echo " Creating Build Directory"
-                    echo "--------------------------------------"
-                    mkdir -p "${BUILD_DIR}"
                     cd "${BUILD_DIR}"
-
-                    echo "--------------------------------------"
-                    echo " Running CMake configure"
-                    echo "--------------------------------------"
-                    cmake .. \
-                        -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
-                        -DCMAKE_BUILD_TYPE=Release
-
-                    echo ""
-                    echo "--------------------------------------"
-                    echo " Building PhyTest_EVSE"
-                    echo "--------------------------------------"
-                    make -j$(nproc)
-
-                    echo ""
-                    echo "--------------------------------------"
-                    echo " Installing"
-                    echo "--------------------------------------"
-                    make install
-
-                    echo ""
-                    echo "--------------------------------------"
-                    echo " Verifying Binary Architecture"
-                    echo "--------------------------------------"
-                    if [ -d "${INSTALL_DIR}" ]; then
-                        find "${INSTALL_DIR}" -type f | xargs file 2>/dev/null || true
-                    else
-                        echo "⚠️ Install directory not found"
-                        exit 1
-                    fi
+                    echo "Running make (incremental if possible)"
+                    make -j$(nproc) || exit 1
+                    echo "Installing binaries"
+                    make install || exit 1
                 '''
             }
         }
@@ -108,25 +81,25 @@ pipeline {
                 archiveArtifacts artifacts: 'build/dist/**', allowEmptyArchive: false
             }
         }
+
+        stage('Deploy to Target Board') {
+            steps {
+                sh '''
+                    echo "Deploying binaries to target board"
+                    ssh ${TARGET_USER}@${TARGET_IP} "mkdir -p ${TARGET_DIR}"
+                    scp -r "${INSTALL_DIR}/"* ${TARGET_USER}@${TARGET_IP}:${TARGET_DIR}/
+                    echo "Deployment complete"
+                '''
+            }
+        }
     }
 
     post {
         success {
-            echo "======================================"
-            echo " GOPAL KORRAPATI"
-            echo " PhyTest_EVSE Build SUCCESS"
-            echo " Build : ${BUILD_NUMBER}"
-            echo " Branch: ${GIT_BRANCH}"
-            echo "======================================"
+            echo "PhyTest_EVSE Build SUCCESS | Build: ${BUILD_NUMBER} | Branch: ${GIT_BRANCH}"
         }
-
         failure {
-            echo "======================================"
-            echo " PhyTest_EVSE Build FAILED"
-            echo " Build : ${BUILD_NUMBER}"
-            echo " Branch: ${GIT_BRANCH}"
-            echo " Logs  : ${BUILD_URL}console"
-            echo "======================================"
+            echo "PhyTest_EVSE Build FAILED | Build: ${BUILD_NUMBER} | Branch: ${GIT_BRANCH} | Logs: ${BUILD_URL}console"
         }
     }
 }
