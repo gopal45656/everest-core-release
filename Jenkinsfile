@@ -7,7 +7,7 @@ pipeline {
         INSTALL_DIR = "${WORKSPACE}/build/dist"
         SDK_ENV = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
         TARGET_BOARD = "root@192.168.11.78"
-        TARGET_DIR = "/home/root/PhyTest_EVSE"
+        TARGET_DIR = "/root/PhyTest_EVSE"
         SSH_CREDENTIAL = "target-board-key"   // Jenkins SSH Credential ID
     }
 
