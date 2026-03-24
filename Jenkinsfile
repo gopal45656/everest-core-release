@@ -15,8 +15,8 @@ pipeline {
         INSTALL_DIR = "${WORKSPACE}/build/dist"
         SDK_ENV = "/opt/ampliphy-xwayland/BSP-Yocto-Ampliphy-AM62x-PD23.2.1/environment-setup-aarch64-phytec-linux"
         TARGET_USER = "root"                // Replace with your target board username
-        TARGET_IP = "192.168.11.50"         // Replace with your target board IP
-        TARGET_DIR = "/home/user/PhyTest_EVSE" // Replace with target directory
+        TARGET_IP = "192.168.11.78"         // Replace with your target board IP
+        TARGET_DIR = "/home/root/PhyTest_EVSE" // Replace with target directory
     }
 
     stages {
