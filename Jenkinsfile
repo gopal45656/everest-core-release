@@ -85,7 +85,7 @@ pipeline {
         stage('Deploy to Target Board') {
             steps {
                 sh '''
-                    echo "Deploying binaries to target board"
+                    echo "Deploying binaries to target board by Gopal"
                     ssh ${TARGET_USER}@${TARGET_IP} "mkdir -p ${TARGET_DIR}"
                     scp -r "${INSTALL_DIR}/"* ${TARGET_USER}@${TARGET_IP}:${TARGET_DIR}/
                     echo "Deployment complete"
