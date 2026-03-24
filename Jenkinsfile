@@ -114,6 +114,7 @@ pipeline {
         success {
             echo "======================================"
             echo " PhyTest_EVSE Build SUCCESS"
+            echo " GOPAL KORRAPATI"
             echo " Build : ${BUILD_NUMBER}"
             echo " Branch: ${GIT_BRANCH}"
             echo "======================================"
