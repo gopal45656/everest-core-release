@@ -59,7 +59,7 @@ pipeline {
                  ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "mkdir -p ${TARGET_DIR}"
 
                  # Copy the manager binary
-                 scp -o StrictHostKeyChecking=no -r ${INSTALL_DIR}/bin/manager ${TARGET_BOARD}:${TARGET_DIR}/
+                 scp -o StrictHostKeyChecking=no -r ${INSTALL_DIR}/* ${TARGET_BOARD}:${TARGET_DIR}/
 
                 echo "Deployment complete. Firmware flash skipped."
               """
