@@ -51,17 +51,20 @@ pipeline {
         }
 
         stage('Deploy to Target Board') {
-            steps {
-                sshagent([env.SSH_CREDENTIAL]) {
-                    sh """
-                        echo "Deploying artifacts to target board..."
-	         	ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "mkdir -p ${TARGET_DIR}"
-                        scp -o StrictHostKeyChecking=no -r ${INSTALL_DIR}/bin/manager ${TARGET_BOARD}:${TARGET_DIR}/ 
-                        echo "Running firmware flash script on target board..."
-                    """
-                }
-            }
-        }
+           steps {
+               sh """
+                 echo "Deploying artifacts to target board..."
+
+                 # Ensure the target directory exists
+                 ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "mkdir -p ${TARGET_DIR}"
+
+                 # Copy the manager binary
+                 scp -o StrictHostKeyChecking=no -r ${INSTALL_DIR}/bin/manager ${TARGET_BOARD}:${TARGET_DIR}/
+
+                echo "Deployment complete. Firmware flash skipped."
+              """
+    }
+}
     }
 
     post {
