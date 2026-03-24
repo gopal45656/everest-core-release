@@ -55,10 +55,9 @@ pipeline {
                 sshagent([env.SSH_CREDENTIAL]) {
                     sh """
                         echo "Deploying artifacts to target board..."
-                        ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "mkdir -p ${TARGET_DIR}"
-                        scp -r ${INSTALL_DIR}/* ${TARGET_BOARD}:${TARGET_DIR}/
+	         	ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "mkdir -p ${TARGET_DIR}"
+                        scp -o StrictHostKeyChecking=no -r ${INSTALL_DIR}/bin/manager ${TARGET_BOARD}:${TARGET_DIR}/ 
                         echo "Running firmware flash script on target board..."
-                        ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "cd ${TARGET_DIR} && ./flash_mcu.sh"
                     """
                 }
             }
