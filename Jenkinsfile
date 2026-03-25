@@ -65,6 +65,37 @@ pipeline {
               """
     }
 }
+stage('Unit Test') {
+    steps {
+        echo "Running unit tests..."
+
+        sh """
+            cd build
+
+            # Run all tests (parallel + fail on error)
+            ctest --output-on-failure --parallel $(nproc) || exit 1
+
+            # Optional: run GTest binaries (if not registered in CTest)
+            if [ -f ./tests/everest_tests ]; then
+                mkdir -p test-results
+                ./tests/everest_tests --gtest_output=xml:test-results/results.xml
+            fi
+        """
+    }
+
+    post {
+        always {
+            echo "Publishing test results..."
+            junit allowEmptyResults: true, testResults: '**/test-results/*.xml'
+        }
+        success {
+            echo "✅ Unit tests passed"
+        }
+        failure {
+            echo "❌ Unit tests failed"
+        }
+    }
+}
     }
 
     post {
