@@ -67,7 +67,7 @@ pipeline {
 }
 stage('Unit Test') {
     steps {
-        echo "Running unit tests..."
+        echo "Running unit tests in PC..."
 
         sh """
             cd build
