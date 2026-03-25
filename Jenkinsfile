@@ -73,7 +73,7 @@ stage('Unit Test') {
             cd build
 
             # Run all tests (parallel + fail on error)
-            ctest --output-on-failure --parallel $(nproc) || exit 1
+            ctest --output-on-failure --parallel  \$(nproc) || exit 1
 
             # Optional: run GTest binaries (if not registered in CTest)
             if [ -f ./tests/everest_tests ]; then
