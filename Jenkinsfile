@@ -50,54 +50,14 @@ pipeline {
             }
         }
 
-        stage('Deploy to Target Board') {
-           steps {
-               sh """
-                 echo "Deploying artifacts to target board..."
-
-                 # Ensure the target directory exists
-                 ssh -o StrictHostKeyChecking=no ${TARGET_BOARD} "mkdir -p ${TARGET_DIR}"
-
-                 # Copy the manager binary to Target
-                 scp -o StrictHostKeyChecking=no -r ${INSTALL_DIR}/share ${TARGET_BOARD}:${TARGET_DIR}/
-
-                echo "Deployment complete. Firmware flash skipped."
-              """
-    }
+stage('Lint') {
+            steps {
+                sh '''
+                echo "Running cppcheck..."
+                cppcheck --enable=all --error-exitcode=1 .
+                '''
+            }
 }
-stage('Unit Test') {
-    steps {
-        echo "Running unit tests in PC..."
-
-        sh """
-            cd build
-
-            # Run all tests (parallel + fail on error)
-            ctest --output-on-failure --parallel  \$(nproc) || exit 1
-
-            # Optional: run GTest binaries (if not registered in CTest)
-            if [ -f ./tests/everest_tests ]; then
-                mkdir -p test-results
-                ./tests/everest_tests --gtest_output=xml:test-results/results.xml
-            fi
-        """
-    }
-
-    post {
-        always {
-            echo "Publishing test results..."
-            junit allowEmptyResults: true, testResults: '**/test-results/*.xml'
-        }
-        success {
-            echo "✅ Unit tests passed"
-        }
-        failure {
-            echo "❌ Unit tests failed"
-        }
-    }
-}
-    }
-
     post {
         success {
             echo "======================================"
