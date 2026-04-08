@@ -20,24 +20,44 @@ void Auth::init() {
         this->config.prioritize_authorization_over_stopping_transaction, this->config.ignore_connector_faults,
         this->info.id, (!this->r_kvs.empty() ? this->r_kvs.at(0).get() : nullptr));
 
-    EVLOG_info << "Auth initializing SocketReceiver subscriptions. Number of socket_receivers: " << r_socket_receiver.size();
+    EVLOG_info << "Auth initializing TCPReceiver subscriptions. Number of tcp_receivers: " << r_tcp_receiver.size();
 
-    for (const auto& socket_receiver : r_socket_receiver) {
-        EVLOG_info << "Auth subscribing to socket_receiver value changes";
-        socket_receiver->subscribe_value(
+    for (const auto& tcp_receiver : r_tcp_receiver) {
+        EVLOG_info << "Auth subscribing to tcp_receiver value changes";
+        tcp_receiver->subscribe_value(
             [this](int signal_value) {
-                EVLOG_info << "Auth received binary signal from SocketReceiver: " << signal_value;
+                EVLOG_info << "Auth received binary signal from TCPReceiver: " << signal_value;
+                // if (signal_value == 1) {
+            //     EVLOG_info << "Setting signal_ok to true";
+            //     this->auth_handler->set_signal_ok(true);
+            //     } else if (signal_value == 0) {
+            //         EVLOG_info << "Setting signal_ok to false";
+            //     this->auth_handler->set_signal_ok(false);
+            // }
                 if (signal_value == 1) {
+
+                    // bool was_disabled = !this->auth_handler->get_signal_ok();
+                    // this->auth_handler->set_signal_ok(true);
+
+                    // if (was_disabled) {
+                    //     // this->auth_handler->retry_last_token_if_possible();
+                    //     EVLOG_info << "TCP re-enabled, restarting charging session";
+                    //     this->auth_handler->retry_last_token_if_possible();
+                    // }
+
+
+                // } else {
                 EVLOG_info << "Setting signal_ok to true";
                 this->auth_handler->set_signal_ok(true);
                 } else if (signal_value == 0) {
                     EVLOG_info << "Setting signal_ok to false";
-                this->auth_handler->set_signal_ok(false);
-            }
+
+                    this->auth_handler->set_signal_ok(false);
+                }
         });
     }
-    if (r_socket_receiver.empty()) {
-        EVLOG_info << "No SocketReceiver connected, setting signal_ok to true by default";
+    if (r_tcp_receiver.empty()) {
+        EVLOG_info << "No TCPReceiver connected, setting signal_ok to true by default";
         this->auth_handler->set_signal_ok(true);
     }
 

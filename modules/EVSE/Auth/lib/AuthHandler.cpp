@@ -60,6 +60,26 @@ AuthHandler::AuthHandler(const SelectionAlgorithm& selection_algorithm, const in
 AuthHandler::~AuthHandler() {
 }
 
+// void AuthHandler::retry_last_token_if_possible() {
+
+//     if (!last_successful_token.has_value()) {
+//         EVLOG_debug << "No last successful token stored, nothing to retry";
+//         return;
+//     }
+
+//     EVLOG_info << "TCP re-enabled, retrying last successful token";
+
+//     std::thread t([this]() {
+//         this->on_token(last_successful_token.value());
+//     });
+
+//     t.detach();
+// }
+
+// bool AuthHandler::get_signal_ok() const {
+//     return signal_ok.load();
+// }
+
 void AuthHandler::init_evse(const int evse_id, const int evse_index, const std::vector<Connector>& connectors) {
     std::lock_guard<std::mutex> lock(this->event_mutex);
     EVLOG_debug << "Add evse with evse id " << evse_id;
@@ -343,7 +363,7 @@ TokenHandlingResult AuthHandler::handle_token(ProvidedIdToken& provided_token, s
                 // Wait for signal to proceed with authorization
                 {
                     if (!this->signal_ok.load()) {
-                        EVLOG_info << "Waiting for Authorization signal from SocketReceiver";
+                        EVLOG_info << "Waiting for Authorization signal from TCPReceiver";
                         while(!this->signal_ok.load()) {
                             std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         }
@@ -402,6 +422,7 @@ TokenHandlingResult AuthHandler::handle_token(ProvidedIdToken& provided_token, s
             i++;
         }
         if (authorized) {
+            // last_successful_token = provided_token;
             return TokenHandlingResult::USED_TO_START_TRANSACTION;
         } else {
             EVLOG_debug << "id_token could not be validated by any validator";
@@ -761,6 +782,15 @@ void AuthHandler::handle_permanent_fault_cleared(const int evse_id, const int32_
 
 void AuthHandler::handle_session_event(const int evse_id, const SessionEvent& event) {
     std::unique_lock<std::mutex> lk(this->event_mutex);
+
+    // if (event.event == SessionEventEnum::TransactionStarted) {
+    //     transaction_active = true;
+    // }
+
+    // if (event.event == SessionEventEnum::SessionFinished) {
+    //     transaction_active = false;
+    // }
+
     // When connector id is not specified, it is assumed to be '1'.
     const int32_t connector_id = event.connector_id.value_or(1);
     if (evse_id <= 0) {

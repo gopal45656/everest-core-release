@@ -216,13 +216,13 @@ void EvseManager::ready() {
     hw_caps_mutex.unlock();
 
     // Subscribe to SocketReceiver signals: when a "0" signal is received, stop charging immediately
-    if (!r_socket_receiver.empty()) {
-        for (const auto& socket_receiver : r_socket_receiver) {
-            socket_receiver->subscribe_value([this](int signal) {
+    if (!r_tcp_receiver.empty()) {
+        for (const auto& tcp_receiver : r_tcp_receiver) {
+            tcp_receiver->subscribe_value([this](int signal) {
                 EVLOG_info << "EvseManager received signal: " << signal;
 
                 if (signal == 0) {
-                    EVLOG_info << "Stop signal received from SocketReceiver: cancelling transaction";
+                    EVLOG_info << "Stop signal received from TCPReceiver: cancelling transaction";
 
                     types::evse_manager::StopTransactionRequest req;
                     req.reason = types::evse_manager::StopTransactionReason::Remote;
@@ -230,7 +230,7 @@ void EvseManager::ready() {
                     try {
                         charger->cancel_transaction(req);
                     } catch (const std::exception& e) {
-                        EVLOG_error << "Error while cancelling transaction from SocketReceiver: " << e.what();
+                        EVLOG_error << "Error while cancelling transaction from TCPReceiver: " << e.what();
                     }
                 }
             });

@@ -1,0 +1,41 @@
+description: Binary Signal Receiver via TCP/IP Socket
+
+config:
+  host:
+    description: IP address to bind/connect
+    type: string
+    default: "0.0.0.0"
+
+  port:
+    description: TCP port number
+    type: integer
+    default: 5000
+
+  socket_mode:
+    description: Socket operating mode (server or client)
+    type: string
+    default: server
+    enum:
+      - server
+      - client
+
+  reconnect_interval_ms:
+    description: Reconnect interval in milliseconds if socket connection is lost
+    type: integer
+    default: 1000
+
+provides:
+  main:
+    description: Binary signal received from external process via Unix domain socket
+    interface: BinarySignal
+    config: {}
+
+requires:
+  auth:
+    interface: auth
+
+metadata:
+  base_license: https://opensource.org/licenses/Apache-2.0
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - himanshu.p@phytecembedded.in

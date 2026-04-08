@@ -439,7 +439,7 @@ requires:
     interface: kvs
     min_connections: 0
     max_connections: 1
-  socket_receiver:
+  tcp_receiver:
     interface: BinarySignal
     min_connections: 0
     max_connections: 1

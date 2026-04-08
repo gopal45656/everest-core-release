@@ -68,6 +68,9 @@ public:
                 const std::string& id, kvsIntf* store);
     virtual ~AuthHandler();
 
+    void retry_last_token_if_possible();
+    // bool get_signal_ok() const;
+
     /**
      * @brief Initializes the evse with the given \p connectors and the given \p evse_id . It instantiates new
      * connector objects and fills data sturctures of the class.
@@ -267,6 +270,9 @@ private:
     bool prioritize_authorization_over_stopping_transaction;
     bool ignore_faults;
     ReservationHandler reservation_handler;
+
+    std::optional<ProvidedIdToken> last_successful_token;
+    std::atomic<bool> transaction_active = false;
 
     std::map<int, std::unique_ptr<EVSEContext>> evses;
 
