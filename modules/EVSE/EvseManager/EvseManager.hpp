@@ -21,6 +21,7 @@
 #include <generated/interfaces/BinarySignal/Interface.hpp>
 #include <generated/interfaces/ISO15118_charger/Interface.hpp>
 #include <generated/interfaces/ac_rcd/Interface.hpp>
+#include <generated/interfaces/can_signal_receiver/Interface.hpp>
 #include <generated/interfaces/connector_lock/Interface.hpp>
 #include <generated/interfaces/evse_board_support/Interface.hpp>
 #include <generated/interfaces/isolation_monitor/Interface.hpp>
@@ -137,7 +138,8 @@ public:
                 std::vector<std::unique_ptr<over_voltage_monitorIntf>> r_over_voltage_monitor,
                 std::vector<std::unique_ptr<power_supply_DCIntf>> r_powersupply_DC,
                 std::vector<std::unique_ptr<kvsIntf>> r_store,
-                std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver, Conf& config) :
+                std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver,
+                std::vector<std::unique_ptr<can_signal_receiverIntf>> r_can_signal_receiver, Conf& config) :
         ModuleBase(info),
         mqtt(mqtt_provider),
         telemetry(telemetry),
@@ -158,6 +160,7 @@ public:
         r_powersupply_DC(std::move(r_powersupply_DC)),
         r_store(std::move(r_store)),
         r_socket_receiver(std::move(r_socket_receiver)),
+        r_can_signal_receiver(std::move(r_can_signal_receiver)),
         config(config){};
 
     Everest::MqttProvider& mqtt;
@@ -179,6 +182,7 @@ public:
     const std::vector<std::unique_ptr<power_supply_DCIntf>> r_powersupply_DC;
     const std::vector<std::unique_ptr<kvsIntf>> r_store;
     const std::vector<std::unique_ptr<BinarySignalIntf>> r_socket_receiver;
+    const std::vector<std::unique_ptr<can_signal_receiverIntf>> r_can_signal_receiver;
     const Conf& config;
 
     // ev@1fce4c5e-0ab8-41bb-90f7-14277703d2ac:v1
@@ -402,6 +406,11 @@ private:
     bool update_supported_energy_transfers(const types::iso15118::EnergyTransferMode& energy_transfer);
     std::mutex hlc_ac_parameters_mutex;
     void update_hlc_ac_parameters();
+
+    // GBT27930 watchdog — detects BMS disconnect when no BCL arrives within timeout
+    std::atomic<std::chrono::steady_clock::time_point> gbt_last_bcl_time_{std::chrono::steady_clock::now()};
+    std::thread gbt_watchdog_thread_;
+
     // ev@211cfdbe-f69a-4cd6-a4ec-f8aaa3d1b6c8:v1
 };
 

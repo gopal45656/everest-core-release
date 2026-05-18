@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 #include <fmt/color.h>
 #include <fmt/core.h>
 
@@ -82,6 +84,93 @@ void EvseManager::init() {
 
     // check if a slac module is connected to the optional requirement
     slac_enabled = not r_slac.empty();
+
+    // Subscribe to CAN signals if a CanBusToEvseManager bridge is connected
+    if (not r_can_signal_receiver.empty()) {
+        EVLOG_info << "CAN signal receiver connected — subscribing to CAN frames";
+
+        // Watchdog: if no BCL arrives within 2 seconds, the BMS has disconnected.
+        // Turn the PSU off to avoid leaving it energised indefinitely.
+        gbt_last_bcl_time_ = std::chrono::steady_clock::now();
+        gbt_watchdog_thread_ = std::thread([this]() {
+            constexpr auto BCL_TIMEOUT = std::chrono::seconds(2);
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                if (powersupply_dc_is_on) {
+                    auto elapsed = std::chrono::steady_clock::now() - gbt_last_bcl_time_.load();
+                    if (elapsed > BCL_TIMEOUT) {
+                        EVLOG_warning << "[EvseManager] *** GBT WATCHDOG *** No BCL for "
+                                      << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+                                      << "ms — BMS disconnected, switching PSU OFF";
+                        powersupply_DC_off();
+                    }
+                }
+            }
+        });
+        gbt_watchdog_thread_.detach();
+        r_can_signal_receiver[0]->subscribe_can_frame([this](const Object& frame) {
+            int id = frame.at("id");
+            int dlc = frame.at("dlc");
+            const Array& data = frame.at("data");
+
+            std::stringstream ss;
+            for (const auto& byte : data) {
+                ss << std::hex << std::setw(2) << std::setfill('0')
+                   << std::uppercase << static_cast<int>(byte) << " ";
+            }
+
+            EVLOG_info << "[EvseManager] Received CAN frame: id=0x"
+                       << std::hex << std::uppercase << id
+                       << " dlc=" << std::dec << dlc
+                       << " data=[" << ss.str() << "]";
+
+            // BST (0x101956F4) — BMS requests stop: switch PSU off
+            if (static_cast<uint32_t>(id) == 0x101956F4u && powersupply_dc_is_on) {
+                EVLOG_info << "[EvseManager] *** GBT CHARGING STOP *** BST received → PSU OFF";
+                powersupply_DC_off();
+            }
+        });
+
+        // Subscribe to decoded power requests from GB/T 27930 BCL frames.
+        // Build an ExternalLimits with the BMS-requested power and inject it
+        // into the energy tree — EnergyManager will enforce it via
+        // energyImpl::handle_enforce_limits() → powersupply_DC_set().
+        // Also directly drive the PSU mode and voltage/current since the
+        // HLC path (which normally does this) is bypassed.
+        r_can_signal_receiver[0]->subscribe_power_request([this](const Object& req) {
+            double voltage_V = req.at("voltage_V");
+            double current_A = req.at("current_A");
+
+            // Reset watchdog — BMS is still alive
+            gbt_last_bcl_time_ = std::chrono::steady_clock::now();
+
+            EVLOG_info << "[EvseManager] GBT power request: "
+                       << voltage_V << "V / " << current_A << "A"
+                       << " → driving PSU directly";
+
+            // Switch PSU on in Export mode if not already on
+            if (not powersupply_dc_is_on) {
+                EVLOG_info << "[EvseManager] *** GBT CHARGING START *** PSU ON → Export mode";
+                power_supply_DC_charging_phase = types::power_supply_DC::ChargingPhase::Charging;
+                powersupply_DC_on();
+            }
+
+            // Set the requested voltage/current directly on the PSU
+            powersupply_DC_set(voltage_V, current_A);
+
+            // Also update local energy limit so EnergyManager stays in sync
+            const double power_W = voltage_V * current_A;
+            const auto timestamp = Everest::Date::to_rfc3339(date::utc_clock::now());
+            types::energy::ExternalLimits limits;
+            types::energy::ScheduleReqEntry entry;
+            entry.timestamp = timestamp;
+            entry.limits_to_leaves.total_power_W = {static_cast<float>(power_W),
+                                                    info.id + "/gbt27930_bcl"};
+            limits.schedule_import = {entry};
+            limits.schedule_export = {};
+            update_local_energy_limit(limits);
+        });
+    }
 
     // if hlc is disabled in config, disable slac even if requirement is connected
     if (not(config.ac_hlc_enabled or config.ac_with_soc or config.charge_mode == "DC")) {
@@ -497,6 +586,9 @@ void EvseManager::ready() {
             if (not r_powersupply_DC.empty()) {
                 r_powersupply_DC[0]->subscribe_voltage_current([this](types::power_supply_DC::VoltageCurrent m) {
                     powersupply_measurement = m;
+
+                    EVLOG_info << "[PSU] Output: " << m.voltage_V << "V / " << m.current_A << "A"
+                               << " (power=" << m.voltage_V * m.current_A << "W)";
                     types::iso15118::DcEvsePresentVoltageCurrent present_values;
                     present_values.evse_present_voltage = (m.voltage_V > 0 ? m.voltage_V : 0.0);
                     present_values.evse_present_current = m.current_A;
@@ -1988,6 +2080,8 @@ void EvseManager::cable_check() {
 
 void EvseManager::powersupply_DC_on() {
     if (not powersupply_dc_is_on) {
+        EVLOG_info << "*** CHARGING START *** DC power supply ON — phase: "
+                   << types::power_supply_DC::charging_phase_to_string(power_supply_DC_charging_phase);
         session_log.evse(false, "DC power supply: switch ON called, ChargingPhase: " +
                                     types::power_supply_DC::charging_phase_to_string(power_supply_DC_charging_phase));
         r_powersupply_DC[0]->call_setMode(types::power_supply_DC::Mode::Export, power_supply_DC_charging_phase);
@@ -2084,6 +2178,9 @@ bool EvseManager::powersupply_DC_set(double _voltage, double _current) {
         session_log.evse(false, fmt::format("DC power supply set: {:.2f}V/{:.2f}A, requested was {:.2f}V/{:.2f}A.",
                                             voltage, current, _voltage, _current));
 
+        EVLOG_info << "[PSU] EvseManager driving PSU: " << voltage << "V / " << current << "A"
+                   << " (requested: " << _voltage << "V / " << _current << "A)";
+
         // set the new limits for the DC output
         r_powersupply_DC[0]->call_setExportVoltageCurrent(voltage, current);
         return true;
@@ -2095,6 +2192,7 @@ bool EvseManager::powersupply_DC_set(double _voltage, double _current) {
 
 void EvseManager::powersupply_DC_off() {
     if (powersupply_dc_is_on) {
+        EVLOG_info << "*** CHARGING STOP *** DC power supply OFF";
         session_log.evse(false, "DC power supply OFF");
         r_powersupply_DC[0]->call_setMode(types::power_supply_DC::Mode::Off, power_supply_DC_charging_phase);
         powersupply_dc_is_on = false;

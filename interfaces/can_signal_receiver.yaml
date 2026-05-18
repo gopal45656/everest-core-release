@@ -1,0 +1,41 @@
+description: >
+  Interface for receiving CAN signals forwarded from a CAN bus module.
+  Consumers of this interface (e.g. EvseManager) subscribe to can_frame
+  to receive decoded CAN frames, and to power_request for decoded BCL
+  voltage/current demands.
+
+vars:
+  can_frame:
+    description: Last CAN frame received from the CAN bus
+    type: object
+    properties:
+      id:
+        description: CAN identifier (11-bit or 29-bit)
+        type: integer
+      extended:
+        description: True for 29-bit extended ID, false for 11-bit standard ID
+        type: boolean
+      dlc:
+        description: Data length code (0..8)
+        type: integer
+      data:
+        description: Payload bytes
+        type: array
+        items:
+          type: integer
+  power_request:
+    description: >
+      Decoded power request from BMS BCL frame. Published every time a BCL
+      is received during charging. EvseManager uses this to set local energy
+      limits which flow through EnergyManager to the power supply.
+    type: object
+    properties:
+      voltage_V:
+        description: Requested output voltage in Volts
+        type: number
+      current_A:
+        description: Requested output current in Amperes
+        type: number
+      charge_mode:
+        description: Charge mode from BCL (0=CC, 1=CV)
+        type: integer

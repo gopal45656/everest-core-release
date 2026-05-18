@@ -83,6 +83,11 @@ void power_supply_DCImpl::handle_setExportVoltageCurrent(double& voltage, double
 
     clampVoltageCurrent(temp_voltage, temp_current);
 
+    EVLOG_info << "Set export voltage/current: " << temp_voltage << "V / " << temp_current << "A"
+               << (temp_voltage != voltage || temp_current != current
+                       ? " (clamped from " + std::to_string(voltage) + "V / " + std::to_string(current) + "A)"
+                       : "");
+
     std::scoped_lock access_lock(power_supply_values_mutex);
     settings_connector_export_voltage = temp_voltage;
     settings_connector_max_export_current = temp_current;
@@ -98,6 +103,8 @@ void power_supply_DCImpl::handle_setImportVoltageCurrent(double& voltage, double
     double temp_current = current;
 
     clampVoltageCurrent(temp_voltage, temp_current);
+
+    EVLOG_info << "Set import voltage/current: " << temp_voltage << "V / " << temp_current << "A";
 
     std::scoped_lock access_lock(power_supply_values_mutex);
     settings_connector_import_voltage = temp_voltage;
@@ -146,6 +153,13 @@ void power_supply_DCImpl::power_supply_worker(void) {
         std::scoped_lock access_lock(power_supply_values_mutex);
         voltage_current.voltage_V = static_cast<float>(connector_voltage);
         voltage_current.current_A = static_cast<float>(connector_current);
+
+        EVLOG_info << "Output: " << voltage_current.voltage_V << "V / "
+                   << voltage_current.current_A << "A"
+                   << " power=" << voltage_current.voltage_V * voltage_current.current_A << "W"
+                   << " mode=" << types::power_supply_DC::mode_to_string(mode)
+                   << " energy_import=" << energy_import_total << "Wh"
+                   << " energy_export=" << energy_export_total << "Wh";
 
         mod->p_main->publish_voltage_current(voltage_current);
         mod->p_powermeter->publish_powermeter(power_meter_external());

@@ -1,0 +1,81 @@
+description: >
+  Generic CAN bus interface providing raw CAN frame
+  send and receive functionality. This interface is intended
+  to be used by higher-level EV charging protocols such as
+  GB/T 27930 DC or CHAdeMO.
+
+cmds:
+  open:
+    description: Open and initialize the CAN interface
+    arguments:
+      ifname:
+        description: SocketCAN interface name (e.g. can0, vcan0)
+        type: string
+    result:
+      description: True if the interface was opened successfully
+      type: boolean
+
+  close:
+    description: Close the CAN interface
+
+  send:
+    description: Send a CAN frame on the CAN bus
+    arguments:
+      id:
+        description: CAN identifier (11-bit or 29-bit)
+        type: integer
+      extended:
+        description: True for 29-bit ID, false for 11-bit ID
+        type: boolean
+      dlc:
+        description: Data length code (0..8)
+        type: integer
+      data:
+        description: Payload bytes (length must match dlc)
+        type: array
+        items:
+          type: integer
+
+    result:
+      description: True if the frame was successfully sent
+      type: boolean
+
+  receive:
+    description: Receive a CAN frame from the CAN bus
+    result:
+      description: Received CAN frame
+      type: object
+      properties:
+        id:
+          description: CAN identifier
+          type: integer
+        extended:
+          description: True for 29-bit ID
+          type: boolean
+        dlc:
+          description: Data length code
+          type: integer
+        data:
+          description: Payload bytes
+          type: array
+          items:
+            type: integer
+
+vars:
+  is_open:
+    description: Indicates whether the CAN interface is currently open
+    type: boolean
+  last_frame:
+    description: Last received CAN frame
+    type: object
+    properties:
+      id:
+        type: integer
+      extended:
+        type: boolean
+      dlc:
+        type: integer
+      data:
+        type: array
+        items:
+          type: integer

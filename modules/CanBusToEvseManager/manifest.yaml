@@ -1,0 +1,27 @@
+description: >
+  Bridge module that subscribes to CAN frames from the CanBus module
+  (HardwareDrivers) and forwards them to consumers via the
+  can_signal_receiver interface. EvseManager (or any other module)
+  can require this interface to receive CAN signals.
+
+metadata:
+  authors:
+    - EVerest Contributors
+  license: https://opensource.org/licenses/Apache-2.0
+
+provides:
+  can_signals:
+    description: Forwards received CAN frames to connected consumers
+    interface: can_signal_receiver
+
+requires:
+  can_bus:
+    interface: CANBus
+    min_connections: 1
+    max_connections: 1
+
+config:
+  log_frames:
+    description: Log every forwarded CAN frame at INFO level
+    type: boolean
+    default: true

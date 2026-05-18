@@ -1,0 +1,179 @@
+# Example configuration: SIL DC charging with CAN bus signal forwarding to EvseManager.
+#
+# Signal flow:
+#   CanBus (HardwareDrivers) --> CanBusToEvseManager (bridge) --> EvseManager
+#
+# EvseManager will log every CAN frame it receives via EVLOG_info.
+# Set can_bus_bridge.log_frames: false to suppress the bridge's own log.
+
+active_modules:
+  energy_manager:
+    module: EnergyManager
+    config_module:
+      schedule_interval_duration: 60
+      schedule_total_duration: 10
+      debug: false
+    connections:
+      energy_trunk:
+        - module_id: grid_connection_point
+          implementation_id: energy_grid
+
+  grid_connection_point:
+    module: EnergyNode
+    config_module:
+      fuse_limit_A: 400
+      phase_count: 3
+    connections:
+      energy_consumer:
+        - module_id: evse_manager
+          implementation_id: energy_grid
+
+  iso15118_charger:
+    module: EvseV2G
+    config_module:
+      device: auto
+      tls_security: allow
+    connections:
+      security:
+        - module_id: evse_security
+          implementation_id: main
+
+  iso15118_car:
+    module: PyEvJosev
+    config_module:
+      device: auto
+      supported_DIN70121: true
+      supported_ISO15118_2: true
+
+  evse_manager:
+    module: EvseManager
+    config_module:
+      connector_id: 1
+      evse_id: DE*PNX*E12345*1
+      evse_id_din: 49A80737A45678
+      session_logging: true
+      session_logging_xml: false
+      session_logging_path: /tmp/everest-logs
+      charge_mode: DC
+      hack_allow_bpt_with_iso2: true
+    connections:
+      bsp:
+        - module_id: yeti_driver
+          implementation_id: board_support
+      powermeter_car_side:
+        - module_id: powersupply_dc
+          implementation_id: powermeter
+      slac:
+        - module_id: slac
+          implementation_id: evse
+      hlc:
+        - module_id: iso15118_charger
+          implementation_id: charger
+      powersupply_DC:
+        - module_id: powersupply_dc
+          implementation_id: main
+      imd:
+        - module_id: imd
+          implementation_id: main
+      over_voltage_monitor:
+        - module_id: ovm
+          implementation_id: main
+      # Connect the CAN bridge so EvseManager receives CAN frames
+      can_signal_receiver:
+        - module_id: can_bus_bridge
+          implementation_id: can_signals
+
+  # CAN bus hardware driver (uses vcan0 for simulation; change to can0 for real hardware)
+  can_bus_hw:
+    module: CanBus
+    config_module:
+      interface: main_mcan0
+      bitrate: 500000
+      enable_fd: false
+      recv_timeout_ms: 100
+
+  # Bridge: subscribes to CanBus.last_frame and forwards via can_signal_receiver interface
+  can_bus_bridge:
+    module: CanBusToEvseManager
+    config_module:
+      log_frames: true
+    connections:
+      can_bus:
+        - module_id: can_bus_hw
+          implementation_id: can_bus
+
+  powersupply_dc:
+    module: DCSupplySimulator
+
+  yeti_driver:
+    module: YetiSimulator
+    config_module:
+      connector_id: 1
+
+  slac:
+    module: SlacSimulator
+
+  imd:
+    config_implementation:
+      main:
+        selftest_success: true
+        resistance_F_Ohm: 900000
+    module: IMDSimulator
+
+  ovm:
+    module: OVMSimulator
+    config_implementation:
+      main:
+        simulate_emergency_shutdown: false
+        simulate_error_delay: 5
+
+  ev_manager:
+    module: EvManager
+    config_module:
+      connector_id: 1
+      auto_enable: true
+      auto_exec: false
+      auto_exec_commands: sleep 1;iec_wait_pwr_ready;sleep 1;draw_power_regulated 16,3;sleep 30;unplug
+      dc_target_current: 20
+      dc_target_voltage: 400
+    connections:
+      ev_board_support:
+        - module_id: yeti_driver
+          implementation_id: ev_board_support
+      ev:
+        - module_id: iso15118_car
+          implementation_id: ev
+      slac:
+        - module_id: slac
+          implementation_id: ev
+
+  auth:
+    module: Auth
+    config_module:
+      connection_timeout: 10
+      selection_algorithm: FindFirst
+    connections:
+      evse_manager:
+        - module_id: evse_manager
+          implementation_id: evse
+      token_provider:
+        - module_id: token_provider
+          implementation_id: main
+      token_validator:
+        - module_id: token_validator
+          implementation_id: main
+
+  token_provider:
+    module: DummyTokenProvider
+    connections:
+      evse:
+        - module_id: evse_manager
+          implementation_id: evse
+
+  token_validator:
+    module: DummyTokenValidator
+
+  evse_security:
+    module: EvseSecurity
+    config_module:
+      private_key_password: ""

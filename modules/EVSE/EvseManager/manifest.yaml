@@ -443,6 +443,10 @@ requires:
     interface: BinarySignal
     min_connections: 0
     max_connections: 1
+  can_signal_receiver:
+    interface: can_signal_receiver
+    min_connections: 0
+    max_connections: 1
 enable_external_mqtt: true
 enable_telemetry: true
 metadata:

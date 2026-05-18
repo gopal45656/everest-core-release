@@ -1,0 +1,41 @@
+description: >
+  Generic CAN bus interface module for EVSE communication.
+  Provides raw CAN frame transmit/receive functionality based on
+  Linux SocketCAN. Intended to be used by higher-level protocol
+  modules such as GB/T 27930 DC, CHAdeMO, or diagnostic services.
+
+metadata:
+  authors:
+    - Your Company / Your Name
+  license: https://opensource.org/licenses/Apache-2.0
+
+provides:
+  can_bus:
+    description: Raw CAN bus access (send/receive CAN frames)
+    interface: CANBus
+
+config:
+  interface:
+    description: SocketCAN network interface name (e.g. can0, can1, vcan0)
+    type: string
+    default: can0
+
+  bitrate:
+    description: CAN bus bitrate in bits per second
+    type: integer
+    default: 500000
+
+  enable_fd:
+    description: Enable CAN-FD support (if supported by hardware)
+    type: boolean
+    default: false
+
+  recv_timeout_ms:
+    description: Receive timeout in milliseconds
+    type: integer
+    default: 100
+
+  tx_queue_size:
+    description: Size of the internal transmit queue
+    type: integer
+    default: 100
