@@ -1,0 +1,91 @@
+settings:
+  telemetry_enabled: true
+active_modules:
+
+  # ── Energy management tree ──────────────────────────────────────────────────
+  energy_manager:
+    module: EnergyManager
+    config_module:
+      schedule_interval_duration: 60
+      schedule_total_duration: 10
+      debug: false
+    connections:
+      energy_trunk:
+        - module_id: grid_connection_point
+          implementation_id: energy_grid
+
+  grid_connection_point:
+    module: EnergyNode
+    config_module:
+      fuse_limit_A: 400
+      phase_count: 3
+    connections:
+      energy_consumer:
+        - module_id: evse_manager
+          implementation_id: energy_grid
+
+  # ── EvseManager — owns the PSU, subscribes to CHAdeMO power requests ────────
+  evse_manager:
+    module: EvseManager
+    config_module:
+      connector_id: 1
+      evse_id: DE*PNX*E12345*1
+      evse_id_din: 49A80737A45678
+      charge_mode: DC
+      disable_authentication: true
+      session_logging: false
+    connections:
+      bsp:
+        - module_id: Yeti
+          implementation_id: board_support
+      powersupply_DC:
+        - module_id: DCSupply
+          implementation_id: main
+      # CHAdeMO publishes power_request and can_frame here
+      can_signal_receiver:
+        - module_id: chademo
+          implementation_id: can_signals
+
+  # ── CHAdeMO protocol module ─────────────────────────────────────────────────
+  chademo:
+    module: Chademo
+    config_module:
+      max_voltage_limit: 500
+      max_current_limit: 50
+      presence_gpio_chip: 2
+      presence_gpio_line: 36
+      publish_interval_ms: 100
+    connections:
+      bsp:
+        - implementation_id: board_support
+          module_id: Yeti
+      can_bus:
+        - implementation_id: can_bus
+          module_id: CanBusHW
+
+  # ── CAN bus hardware driver ─────────────────────────────────────────────────
+  CanBusHW:
+    module: CanBus
+    config_module:
+      interface: main_mcan0
+      bitrate: 500000
+      enable_fd: false
+      recv_timeout_ms: 100
+
+  # ── Power supply ────────────────────────────────────────────────────────────
+  DCSupply:
+    module: DCSupplySimulator
+    config_implementation:
+      main:
+        bidirectional: false
+        max_power: 150000
+        min_voltage: 0.0
+        max_voltage: 1000.0
+        min_current: 0.0
+        max_current: 200.0
+
+  # ── Board support ───────────────────────────────────────────────────────────
+  Yeti:
+    module: YetiSimulator
+    config_module:
+      connector_id: 1

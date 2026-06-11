@@ -56,12 +56,15 @@ bool CanDevice::open_device(const char* dev) {
             return false;
         }
 
+        // Increase the socket send buffer to avoid ENOBUFS when sharing the bus
+        int sndbuf = 65536;
+        setsockopt(can_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+
         // spawn read thread
         exit_rx_thread = false;
         rx_thread_handle = std::thread(&CanDevice::rx_thread, this);
 
-        return true;
-    }
+        return true;    }
 }
 
 bool CanDevice::close_device() {

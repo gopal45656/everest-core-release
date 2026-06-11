@@ -9,9 +9,8 @@
 #include <everest/logging.hpp>
 
 InfyCanDevice::InfyCanDevice() {
-    // spawn thread that requests some data periodically to keep the connection alive
+    // txThread is started in open_device() after the socket is ready
     exitTxThread = false;
-    txThreadHandle = std::thread(&InfyCanDevice::txThread, this);
 }
 
 InfyCanDevice::~InfyCanDevice() {
@@ -235,6 +234,10 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
 }
 
 void InfyCanDevice::txThread() {
+    // Wait for the CAN bus to settle before starting periodic requests.
+    // This prevents TX queue overflow when sharing the interface with other modules.
+    usleep(500000); // 500ms startup delay
+
     while (!exitTxThread) {
         // request current system DC voltage. Answer will be processed by RX thread.
         request_rx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::SystemDCVoltage());

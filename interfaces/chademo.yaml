@@ -1,0 +1,21 @@
+description: CHAdeMO charging interface for simulation and hardware
+
+vars:
+  is_plugged_in:
+    description: Status of the physical or simulated plug connection
+    type: boolean
+  current_voltage:
+    description: Actual voltage measured (V)
+    type: number
+  current_current:
+    description: Actual current measured (A)
+    type: number
+  soc:
+    description: State of Charge (%)
+    type: number
+
+cmds:
+  start_charging:
+    description: Command to start the CHAdeMO sequence
+  stop_charging:
+    description: Command to stop the CHAdeMO sequence

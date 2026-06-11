@@ -114,6 +114,30 @@ bool CANBusImpl::handle_open(std::string& ifname) {
     struct ifreq ifr;
     struct sockaddr_can addr;
 
+    // Bring the interface down first (required to change bitrate on a live interface)
+    std::string down_cmd = "ip link set " + ifname + " down";
+    int ret_down = std::system(down_cmd.c_str());
+    if (ret_down != 0) {
+        EVLOG_warning << "Failed to bring " << ifname << " down (may already be down): " << ret_down;
+    }
+
+    // Set bitrate and bring the interface up as a CAN interface
+    std::string up_cmd = "ip link set " + ifname + " up type can bitrate " +
+                         std::to_string(mod->config.bitrate);
+    int ret_up = std::system(up_cmd.c_str());
+    if (ret_up != 0) {
+        EVLOG_error << "Failed to bring up CAN interface " << ifname
+                    << " at " << mod->config.bitrate << " bps (exit=" << ret_up << ")";
+        // Don't abort — the interface may already be up with the correct bitrate
+    } else {
+        EVLOG_info << "CAN interface " << ifname << " up at " << mod->config.bitrate << " bps";
+    }
+
+    // Increase TX queue length so multiple sockets on the same interface
+    // don't overflow each other's send buffers (ENOBUFS)
+    std::string txq_cmd = "ip link set " + ifname + " txqueuelen 1000";
+    std::system(txq_cmd.c_str());
+
     fcntl(socket_fd, F_SETFL, O_NONBLOCK);
 
     socket_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);

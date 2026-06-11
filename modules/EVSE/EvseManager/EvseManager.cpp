@@ -141,16 +141,25 @@ void EvseManager::init() {
             double voltage_V = req.at("voltage_V");
             double current_A = req.at("current_A");
 
-            // Reset watchdog — BMS is still alive
+            // Reset watchdog — protocol module is still alive
             gbt_last_bcl_time_ = std::chrono::steady_clock::now();
 
-            EVLOG_info << "[EvseManager] GBT power request: "
+            EVLOG_info << "[EvseManager] CAN power request: "
                        << voltage_V << "V / " << current_A << "A"
                        << " → driving PSU directly";
 
+            // A zero-voltage/zero-current request is a stop signal
+            if (voltage_V <= 0.0 || current_A <= 0.0) {
+                if (powersupply_dc_is_on) {
+                    EVLOG_info << "[EvseManager] *** CHARGING STOP *** zero power_request → PSU OFF";
+                    powersupply_DC_off();
+                }
+                return;
+            }
+
             // Switch PSU on in Export mode if not already on
             if (not powersupply_dc_is_on) {
-                EVLOG_info << "[EvseManager] *** GBT CHARGING START *** PSU ON → Export mode";
+                EVLOG_info << "[EvseManager] *** CHARGING START *** PSU ON → Export mode";
                 power_supply_DC_charging_phase = types::power_supply_DC::ChargingPhase::Charging;
                 powersupply_DC_on();
             }
@@ -165,7 +174,7 @@ void EvseManager::init() {
             types::energy::ScheduleReqEntry entry;
             entry.timestamp = timestamp;
             entry.limits_to_leaves.total_power_W = {static_cast<float>(power_W),
-                                                    info.id + "/gbt27930_bcl"};
+                                                    info.id + "/can_power_request"};
             limits.schedule_import = {entry};
             limits.schedule_export = {};
             update_local_energy_limit(limits);
@@ -188,7 +197,12 @@ void EvseManager::init() {
     if (not slac_enabled)
         hlc_enabled = false;
 
-    if (config.charge_mode == "DC" and (not hlc_enabled or not slac_enabled or r_powersupply_DC.empty())) {
+    // In CAN-driven mode (CHAdeMO / GB/T 27930), HLC and SLAC are not used —
+    // the protocol module drives the PSU directly via can_signal_receiver.
+    // Skip the HLC/SLAC requirement check in that case.
+    const bool can_driven_mode = not r_can_signal_receiver.empty();
+    if (config.charge_mode == "DC" and not can_driven_mode and
+        (not hlc_enabled or not slac_enabled or r_powersupply_DC.empty())) {
         EVLOG_error << "DC mode requires slac, HLC and powersupply DCDC to be connected";
         exit(255);
     }
@@ -227,6 +241,15 @@ void EvseManager::init() {
                 }
             });
         }
+    } else if (can_driven_mode and config.charge_mode == "DC" and not r_powersupply_DC.empty()) {
+        // In CAN-driven mode (CHAdeMO / GB/T 27930) HLC is not used, but we still need
+        // to update PSU capabilities so powersupply_DC_set() uses the correct voltage/current limits.
+        r_powersupply_DC[0]->subscribe_capabilities([this](const auto& caps) {
+            std::scoped_lock lock(powersupply_capabilities_mutex);
+            powersupply_capabilities = caps;
+            EVLOG_info << "[EvseManager] PSU capabilities updated: max_export_voltage="
+                       << caps.max_export_voltage_V << "V max_export_current=" << caps.max_export_current_A << "A";
+        });
     }
 
     r_bsp->subscribe_request_stop_transaction(
@@ -589,31 +612,34 @@ void EvseManager::ready() {
 
                     EVLOG_info << "[PSU] Output: " << m.voltage_V << "V / " << m.current_A << "A"
                                << " (power=" << m.voltage_V * m.current_A << "W)";
-                    types::iso15118::DcEvsePresentVoltageCurrent present_values;
-                    present_values.evse_present_voltage = (m.voltage_V > 0 ? m.voltage_V : 0.0);
-                    present_values.evse_present_current = m.current_A;
 
-                    if (config.hack_present_current_offset > 0) {
-                        const auto current_offset = std::fabs(present_values.evse_present_current.value()) +
-                                                    static_cast<float>(config.hack_present_current_offset);
-                        present_values.evse_present_current = (m.current_A >= 0) ? current_offset : -current_offset;
-                    }
+                    // Only forward present values to HLC when it is connected (not in CAN-driven mode)
+                    if (hlc_enabled) {
+                        types::iso15118::DcEvsePresentVoltageCurrent present_values;
+                        present_values.evse_present_voltage = (m.voltage_V > 0 ? m.voltage_V : 0.0);
+                        present_values.evse_present_current = m.current_A;
 
-                    if (config.hack_pause_imd_during_precharge and m.voltage_V * std::fabs(m.current_A) > 1000) {
-                        // Start IMD again as it was stopped after CableCheck
-                        imd_start();
-                        EVLOG_info << "Hack: Restarting Isolation Measurement at " << m.voltage_V << " " << m.current_A;
-                    }
+                        if (config.hack_present_current_offset > 0) {
+                            const auto current_offset = std::fabs(present_values.evse_present_current.value()) +
+                                                        static_cast<float>(config.hack_present_current_offset);
+                            present_values.evse_present_current =
+                                (m.current_A >= 0) ? current_offset : -current_offset;
+                        }
 
-                    r_hlc[0]->call_update_dc_present_values(present_values);
+                        if (config.hack_pause_imd_during_precharge and m.voltage_V * std::fabs(m.current_A) > 1000) {
+                            imd_start();
+                            EVLOG_info << "Hack: Restarting Isolation Measurement at " << m.voltage_V << " "
+                                       << m.current_A;
+                        }
 
-                    {
-                        // dont publish ev_info here, it will be published when other values change.
-                        // otherwise we will create too much traffic on mqtt
-                        Everest::scoped_lock_timeout lock(ev_info_mutex, Everest::MutexDescription::EVSE_set_ev_info);
-                        ev_info.present_voltage = present_values.evse_present_voltage;
-                        ev_info.present_current = present_values.evse_present_current;
-                        // p_evse->publish_ev_info(ev_info);
+                        r_hlc[0]->call_update_dc_present_values(present_values);
+
+                        {
+                            Everest::scoped_lock_timeout lock(ev_info_mutex,
+                                                              Everest::MutexDescription::EVSE_set_ev_info);
+                            ev_info.present_voltage = present_values.evse_present_voltage;
+                            ev_info.present_current = present_values.evse_present_current;
+                        }
                     }
                 });
             }

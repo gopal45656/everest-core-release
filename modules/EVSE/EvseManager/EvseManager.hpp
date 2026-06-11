@@ -215,6 +215,7 @@ public:
     int32_t get_reservation_id();
 
     bool get_hlc_waiting_for_auth_pnc();
+    bool is_hlc_enabled() const { return hlc_enabled; }
     void set_pnc_enabled(const bool pnc_enabled);
     void set_central_contract_validation_allowed(const bool central_contract_validation_allowed);
     void set_contract_certificate_installation_enabled(const bool contract_certificate_installation_enabled);

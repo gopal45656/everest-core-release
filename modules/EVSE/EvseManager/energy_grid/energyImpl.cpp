@@ -638,8 +638,12 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
                                   "Change HLC Limits: {}W/{}A, target_voltage {}, actual_voltage {}, bpt_active {}",
                                   evse_max_limits.evse_maximum_power_limit, evse_max_limits.evse_maximum_current_limit,
                                   target_voltage, actual_voltage, mod->is_actually_exporting_to_grid));
-                    mod->r_hlc[0]->call_update_dc_maximum_limits(evse_max_limits);
-                    mod->r_hlc[0]->call_update_dc_minimum_limits(evse_min_limits);
+
+                    // Only forward limits to HLC when it is connected (not in CAN-driven mode)
+                    if (mod->is_hlc_enabled()) {
+                        mod->r_hlc[0]->call_update_dc_maximum_limits(evse_max_limits);
+                        mod->r_hlc[0]->call_update_dc_minimum_limits(evse_min_limits);
+                    }
                     mod->charger->inform_new_evse_max_hlc_limits(evse_max_limits);
                     mod->charger->inform_new_evse_min_hlc_limits(evse_min_limits);
 

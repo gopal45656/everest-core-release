@@ -1,0 +1,46 @@
+description: CHAdeMO Simulation module.
+config:
+  max_voltage_limit:
+    description: Maximum voltage for simulation
+    type: number
+    default: 500.0
+  max_current_limit:
+    description: Maximum current for simulation
+    type: number
+    default: 50.0
+  publish_interval_ms:
+    description: Loop speed
+    type: integer
+    default: 100
+  presence_gpio_chip:
+    description: "The GPIO chip index (e.g., 2 for gpiochip2)"
+    type: integer
+    default: 2
+  presence_gpio_line:
+    description: "The GPIO line/pin number (e.g., 36)"
+    type: integer
+    default: 36
+
+provides:
+  main:
+    interface: chademo
+    description: Main CHAdeMO implementation
+  can_signals:
+    interface: can_signal_receiver
+    description: >
+      Publishes decoded CHAdeMO power requests and raw CAN frames.
+      EvseManager subscribes to power_request to drive the PSU,
+      and to can_frame for stop detection (0x102 fault / session end).
+
+requires:
+  bsp:
+    interface: evse_board_support
+  can_bus:
+    interface: CANBus
+    min_connections: 1
+    max_connections: 1
+
+metadata:
+    license: "https://opensource.org/licenses/Apache-2.0"
+    authors:
+     - "prameela"
