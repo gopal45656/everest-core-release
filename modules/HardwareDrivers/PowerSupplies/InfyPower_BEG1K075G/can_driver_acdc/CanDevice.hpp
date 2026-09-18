@@ -7,6 +7,7 @@
 #include "CanPackets.hpp"
 #include <atomic>
 #include <linux/can.h>
+#include <mutex>
 #include <thread>
 
 class CanDevice {
@@ -22,6 +23,7 @@ protected:
 
 private:
     int can_fd;
+    std::mutex tx_mutex;   // serialises all writes to can_fd
     std::atomic_bool exit_rx_thread;
     std::thread rx_thread_handle;
     void rx_thread();

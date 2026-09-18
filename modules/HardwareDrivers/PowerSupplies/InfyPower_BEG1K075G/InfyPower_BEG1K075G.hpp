@@ -21,6 +21,11 @@ namespace module {
 
 struct Conf {
     std::string can_device;
+    std::string module_addresses;
+    int         heartbeat_timeout_ms;
+    double      overtemperature_limit_C;
+    double      conversion_efficiency_export;
+    double      per_module_rated_power_W;
 };
 
 class InfyPower_BEG1K075G : public Everest::ModuleBase {
@@ -33,7 +38,7 @@ public:
     const Conf& config;
 
     // ev@1fce4c5e-0ab8-41bb-90f7-14277703d2ac:v1
-    InfyCanDevice acdc;
+    std::unique_ptr<InfyCanDevice> acdc;
     // ev@1fce4c5e-0ab8-41bb-90f7-14277703d2ac:v1
 
 protected:

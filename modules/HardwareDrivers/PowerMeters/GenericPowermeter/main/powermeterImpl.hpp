@@ -93,6 +93,11 @@ private:
         REGISTER_TYPE_UNDEFINED
     };
 
+    enum DataFormat {
+        DATA_FORMAT_FLOAT32,
+        DATA_FORMAT_UINT16
+    };
+
     struct RegisterData {
         float multiplier;
         PowermeterRegisters type;
@@ -101,6 +106,7 @@ private:
         uint16_t exponent_register;
         ModbusFunctionType exponent_register_function;
         uint16_t num_registers;
+        DataFormat data_format;
     };
 
     std::vector<RegisterData> pm_configuration;
@@ -127,6 +133,9 @@ private:
         std::optional<std::reference_wrapper<const types::serial_comm_hub_requests::Result>> exponent_message);
     float merge_register_values_into_element(const RegisterData& reg_data, const int16_t exponent,
                                              const types::serial_comm_hub_requests::Result& reg_message);
+    std::string modbus_function_to_string(ModbusFunctionType function_type) const;
+    std::string powermeter_register_type_to_string(PowermeterRegisters register_type) const;
+    std::string dump_response_values(const types::serial_comm_hub_requests::Result& response) const;
     void process_current_rate_message(const types::serial_comm_hub_requests::Result message);
     void output_error_with_content(const types::serial_comm_hub_requests::Result& response);
     // ev@3370e4dd-95f4-47a9-aaec-ea76f34a66c9:v1

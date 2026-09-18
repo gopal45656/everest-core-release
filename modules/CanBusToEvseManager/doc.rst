@@ -1,10 +1,13 @@
-.. _canbus_to_evse_manager:
+.. _everest_modules_handwritten_CanBusToEvseManager:
 
+*******************************************
 CanBusToEvseManager
-===================
+*******************************************
+
+:ref:`Link <everest_modules_CanBusToEvseManager>` to the module's reference.
 
 Overview
---------
+========
 
 ``CanBusToEvseManager`` is a bridge module that implements the **GB/T 27930** DC charging
 protocol over CAN bus and integrates it with EVerest's ``EvseManager``.
@@ -16,14 +19,14 @@ HLC path entirely for DC charging.
 .. code-block:: text
 
     BMS (EV)
-      │  CAN frames (BHM, BCP, BCL, BCS, BST, BSD)
+      │  CAN frames (BHM, BCP, BCL, BCS, BST, BSD, ...)
       ▼
     CanBus (HardwareDrivers)
       │  last_frame var
       ▼
     CanBusToEvseManager  ◄──── GbtProtocol state machine
       │  can_signal_receiver interface
-      │    ├─ can_frame var  ──────────────────► EvseManager (logging)
+      │    ├─ can_frame var  ──────────────────► EvseManager (logging + BST detection)
       │    └─ power_request var ───────────────► EvseManager
       │                                              │
       │                                              ├─ powersupply_DC_on()
@@ -36,21 +39,22 @@ HLC path entirely for DC charging.
 
 
 Architecture
-------------
+============
 
 The module consists of three layers:
 
-1. **CAN transport** — ``r_can_bus`` (``CANBus`` interface) receives raw frames and sends
-   charger responses.
+1. **CAN transport** — ``r_can_bus`` (``CANBus`` interface) receives raw frames via the
+   ``last_frame`` variable subscription and transmits charger response frames via ``call_send()``.
 
-2. **GB/T 27930 state machine** — ``GbtProtocol`` class (``GbtProtocol.hpp``) decodes BMS
-   messages and drives the charger-side protocol sequence.
+2. **GB/T 27930 state machine** — ``GbtProtocol`` class (``GbtProtocol.hpp``) decodes incoming
+   BMS messages and drives the charger-side protocol sequence, generating the correct charger
+   responses at each state transition.
 
 3. **EVerest integration** — ``p_can_signals`` (``can_signal_receiver`` interface) publishes
-   decoded data to ``EvseManager``.
+   decoded data to ``EvseManager`` via two variables: ``can_frame`` and ``power_request``.
 
 GB/T 27930 Protocol State Machine
-----------------------------------
+==================================
 
 The ``GbtProtocol`` class implements the charger side of GB/T 27930. It handles all BMS
 messages and generates the corresponding charger responses.
@@ -65,7 +69,7 @@ State sequence:
     Handshake  ──TX──► CHM (charger announces max V/I)
       │  BCP received (battery parameters) — BRM optional
       ▼
-    Config  ──TX──► CRM + CTS + CML + CRO
+    Recognition / Config  ──TX──► CRM + CTS + CML + CRO
       │  Auto-transitions to Charging (BRO not required by all BMS)
       ▼
     Charging  ◄──► BCL/BCS loop
@@ -76,98 +80,162 @@ State sequence:
       ▼
     Finished  ──TX──► CSD
 
-Message mapping:
+BRM handling note: some BMS implementations skip BRM and go directly from BHM to BCP. The
+state machine handles this gracefully by sending CRM when BCP arrives in Handshake state.
 
-+--------+----------------------------------+--------+----------------------------------+
-| BMS TX | Description                      | EVSE TX| Description                      |
-+========+==================================+========+==================================+
-| BHM    | BMS handshake                    | CHM    | Charger handshake                |
-+--------+----------------------------------+--------+----------------------------------+
-| BRM    | Battery recognition (optional)   | CRM    | Charger recognition              |
-+--------+----------------------------------+--------+----------------------------------+
-| BCP    | Battery charge parameters        | CTS    | Estimated charge time            |
-+--------+----------------------------------+--------+----------------------------------+
-|        |                                  | CML    | Charger mode (CC/CV)             |
-+--------+----------------------------------+--------+----------------------------------+
-| BRO    | BMS ready (optional)             | CRO    | Charger ready to output          |
-+--------+----------------------------------+--------+----------------------------------+
-| BCL    | Battery charge demand (V/I loop) | CCS    | Charger charge status            |
-+--------+----------------------------------+--------+----------------------------------+
-| BCS    | Battery charge status            |        |                                  |
-+--------+----------------------------------+--------+----------------------------------+
-| BSM    | Battery temperature status       |        |                                  |
-+--------+----------------------------------+--------+----------------------------------+
-| BST    | BMS stop transmission            | CST    | Charger stop transmission        |
-+--------+----------------------------------+--------+----------------------------------+
-| BSD    | BMS session statistics           | CSD    | Charger session statistics       |
-+--------+----------------------------------+--------+----------------------------------+
-| BEM    | BMS error                        | CST    | Charger stop (fault)             |
-+--------+----------------------------------+--------+----------------------------------+
+Similarly, some BMS implementations skip BRO and go straight from BCP to BCL. The state machine
+auto-transitions to Charging after sending CRO during Config, so BCL frames are accepted even
+without an explicit BRO.
+
+Message Mapping
+---------------
+
++--------+----------------------------------------+--------+------------------------------------------+
+| BMS TX | Description                            | EVSE TX| Description                              |
++========+========================================+========+==========================================+
+| BHM    | BMS handshake                          | CHM    | Charger handshake (max V/I/type)         |
++--------+----------------------------------------+--------+------------------------------------------+
+| BRM    | Battery recognition (optional)         | CRM    | Charger recognition (ready + status)     |
++--------+----------------------------------------+--------+------------------------------------------+
+| BCP    | Battery charge parameters              | CTS    | Estimated charge time (fixed: 3600s)     |
++--------+----------------------------------------+--------+------------------------------------------+
+|        |                                        | CML    | Charger mode (CC = 1)                    |
++--------+----------------------------------------+--------+------------------------------------------+
+| BRO    | BMS ready for output (optional)        | CRO    | Charger ready to output                  |
++--------+----------------------------------------+--------+------------------------------------------+
+| BCL    | Battery charge demand (V/I loop)       | CCS    | Charger charge status (echo of setpoint) |
++--------+----------------------------------------+--------+------------------------------------------+
+| BCS    | Battery charge status (V/I/SoC/temp)   |        |                                          |
++--------+----------------------------------------+--------+------------------------------------------+
+| BSM    | Battery temperature status (max/min)   |        |                                          |
++--------+----------------------------------------+--------+------------------------------------------+
+| BMV    | Battery min/max cell voltage           |        | (logged, not acted upon)                 |
++--------+----------------------------------------+--------+------------------------------------------+
+| BMT    | Battery min/max cell temperature       |        | (logged, not acted upon)                 |
++--------+----------------------------------------+--------+------------------------------------------+
+| BSP    | BMS stop preparation                   |        | (logged, not acted upon)                 |
++--------+----------------------------------------+--------+------------------------------------------+
+| BST    | BMS stop transmission                  | CST    | Charger stop transmission                |
++--------+----------------------------------------+--------+------------------------------------------+
+| BSD    | BMS session statistics                 | CSD    | Charger session statistics               |
++--------+----------------------------------------+--------+------------------------------------------+
+| BEM    | BMS error message                      | CST    | Charger stop (fault, with fault code)    |
++--------+----------------------------------------+--------+------------------------------------------+
+|        |                                        | CEM    | Charger error message (defined in DBC)   |
++--------+----------------------------------------+--------+------------------------------------------+
+
+Hardcoded Charger Parameters
+-----------------------------
+
+The following charger capability parameters are hardcoded in ``CanBusToEvseManager.cpp`` and
+announced to the BMS during the handshake phase. They can be changed by modifying the
+``protocol->`` fields in ``ready()``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Parameter
+     - Value
+     - Description
+   * - ``charger_max_voltage_V``
+     - 1000 V
+     - Maximum output voltage advertised to the BMS in CHM
+   * - ``charger_max_current_A``
+     - 250 A
+     - Maximum output current advertised to the BMS in CHM
+   * - ``charger_type``
+     - 1
+     - Charger type code (1 = off-board DC charger per GB/T 27930)
+   * - ``charger_temp_C``
+     - 25 °C
+     - Charger internal temperature reported back to the BMS in CCS
 
 Interfaces
-----------
+==========
 
 Provides
-~~~~~~~~
+--------
 
 ``can_signals`` (``can_signal_receiver``)
   Publishes two variables to connected modules (typically ``EvseManager``):
 
-  - ``can_frame`` — raw CAN frame forwarded on every received frame
-  - ``power_request`` — decoded BCL data: ``{voltage_V, current_A, charge_mode}``
-    published every time a BCL frame arrives during the Charging state
+  - ``can_frame`` — the raw CAN frame object forwarded on every received frame, containing
+    ``id`` (uint32), ``extended`` (bool), ``dlc`` (int), and ``data`` (byte array).
+  - ``power_request`` — decoded BCL data published every time a BCL frame arrives during the
+    Charging state. Fields:
+
+    .. list-table::
+       :header-rows: 1
+       :widths: 20 15 65
+
+       * - Field
+         - Type
+         - Description
+       * - ``voltage_V``
+         - float
+         - Target output voltage requested by the BMS (V), clamped to ``charger_max_voltage_V``
+       * - ``current_A``
+         - float
+         - Target output current requested by the BMS (A), clamped to ``charger_max_current_A``
+       * - ``charge_mode``
+         - int
+         - GB/T 27930 charge mode: ``0`` = constant voltage (CV), ``1`` = constant current (CC)
 
 Requires
-~~~~~~~~
+--------
 
 ``can_bus`` (``CANBus``)
-  Raw CAN bus access. The module subscribes to ``last_frame`` for RX and calls
-  ``send()`` for TX.
+  Raw CAN bus access. The module subscribes to the ``last_frame`` variable for RX and calls
+  ``send()`` for TX. Exactly one connection is required (``min_connections: 1``,
+  ``max_connections: 1``).
 
 Configuration
--------------
+=============
 
 .. list-table::
    :header-rows: 1
+   :widths: 20 15 65
 
    * - Parameter
-     - Type
-     - Default
+     - Type / Default
      - Description
    * - ``log_frames``
-     - boolean
-     - ``true``
-     - Log every received CAN frame at INFO level
+     - boolean / ``true``
+     - Log every received CAN frame at INFO level, including frame ID, DLC, raw data bytes,
+       and current protocol state.
 
 EvseManager Integration
------------------------
+=======================
 
 ``EvseManager`` was extended to optionally require the ``can_signal_receiver`` interface.
 When connected, it subscribes to two vars:
 
-**``can_frame``**
-  Logs every received CAN frame. Also detects BST (``0x101956F4``) to trigger
+``can_frame``
+  Logs every received CAN frame. Also detects BST (frame ID ``0x101956F4``) to trigger
   ``powersupply_DC_off()``.
 
-**``power_request``**
+``power_request``
   On every BCL-derived power request:
 
-  1. Resets the BCL watchdog timer
-  2. Calls ``powersupply_DC_on()`` if the PSU is not already on (first BCL = charging start)
-  3. Calls ``powersupply_DC_set(voltage_V, current_A)`` to set the PSU output
-  4. Calls ``update_local_energy_limit()`` to keep the EnergyManager in sync
+  1. Resets the BCL watchdog timer.
+  2. Calls ``powersupply_DC_on()`` if the PSU is not already on (first BCL = charging start).
+  3. Calls ``powersupply_DC_set(voltage_V, current_A)`` to update the PSU output setpoint.
+  4. Calls ``update_local_energy_limit()`` to keep the EnergyManager in sync.
 
-**BCL Watchdog**
-  A background thread checks every 500ms whether a BCL has been received within the last
-  2 seconds. If not (BMS disconnected or simulator killed), it calls
-  ``powersupply_DC_off()`` automatically.
+BCL Watchdog
+------------
 
-  Log output on watchdog trigger::
+A background thread in EvseManager checks every 500ms whether a BCL frame has been received
+within the last 2 seconds. If the timeout is exceeded (BMS disconnected or simulator killed),
+it calls ``powersupply_DC_off()`` automatically.
+
+Log output on watchdog trigger::
 
     [EvseManager] *** GBT WATCHDOG *** No BCL for 2100ms — BMS disconnected, switching PSU OFF
 
 Power Supply Control Flow
---------------------------
+=========================
 
 .. code-block:: text
 
@@ -175,7 +243,7 @@ Power Supply Control Flow
         │
         ├─ GbtProtocol: update bms.requested_voltage_V / current_A
         ├─ GbtProtocol: TX CCS (echo back actual output)
-        └─ publish_power_request({voltage_V:450, current_A:150})
+        └─ publish_power_request({voltage_V:450, current_A:150, charge_mode:1})
                 │
                 └─ EvseManager::subscribe_power_request()
                         ├─ [first BCL] powersupply_DC_on()
@@ -198,10 +266,11 @@ Power Supply Control Flow
                                → evse_manager: "*** CHARGING STOP ***"
 
 Key Log Messages
-----------------
+================
 
 .. list-table::
    :header-rows: 1
+   :widths: 20 40 40
 
    * - Module
      - Log message
@@ -211,16 +280,16 @@ Key Log Messages
      - BMS connected, handshake started
    * - ``can_bus_bridge``
      - ``[GBT27930] TX CHM``
-     - Charger announced capabilities
+     - Charger announced capabilities to BMS
    * - ``can_bus_bridge``
      - ``[GBT27930] BCP received``
-     - Battery parameters received
+     - Battery charge parameters received
    * - ``can_bus_bridge``
      - ``[GBT27930] Auto-transitioning to Charging``
-     - BRO skipped, entering charging loop
+     - BRO skipped by BMS, entering charging loop
    * - ``can_bus_bridge``
      - ``[CanBusToEvseManager] Publishing power request: 450V / 15A``
-     - BCL decoded, forwarding to EvseManager
+     - BCL decoded, forwarding power request to EvseManager
    * - ``evse_manager``
      - ``*** CHARGING START *** DC power supply ON``
      - First BCL received, PSU switched on
@@ -238,16 +307,17 @@ Key Log Messages
      - BMS requested stop
    * - ``evse_manager``
      - ``*** CHARGING STOP *** DC power supply OFF``
-     - PSU switched off
+     - PSU switched off after BST or watchdog
    * - ``evse_manager``
      - ``*** GBT WATCHDOG *** No BCL for Xms``
      - BMS disconnected without sending BST
 
 Files
------
+=====
 
 .. list-table::
    :header-rows: 1
+   :widths: 45 55
 
    * - File
      - Description
@@ -256,24 +326,24 @@ Files
    * - ``modules/CanBusToEvseManager/CanBusToEvseManager.hpp``
      - Module class declaration
    * - ``modules/CanBusToEvseManager/CanBusToEvseManager.cpp``
-     - Module implementation — CAN subscription, power_request publishing
+     - Module implementation — CAN subscription, hardcoded charger parameters, power_request publishing
    * - ``modules/CanBusToEvseManager/GbtProtocol.hpp``
-     - GB/T 27930 charger-side state machine
+     - GB/T 27930 charger-side state machine (header-only)
    * - ``modules/CanBusToEvseManager/gbt27930.h``
-     - DBC-generated codec header (cantools)
+     - DBC-generated codec header (cantools v41.2.1), all message structs and encode/decode functions
    * - ``modules/CanBusToEvseManager/gbt27930.c``
-     - DBC-generated codec implementation (cantools)
+     - DBC-generated codec implementation (cantools v41.2.1)
    * - ``modules/CanBusToEvseManager/can_signals/can_signal_receiverImpl.hpp``
-     - Interface implementation header
+     - ``can_signal_receiver`` interface implementation header (publishes vars only, no logic)
    * - ``modules/CanBusToEvseManager/can_signals/can_signal_receiverImpl.cpp``
-     - Interface implementation
+     - ``can_signal_receiver`` interface implementation (init/ready are no-ops)
    * - ``interfaces/can_signal_receiver.yaml``
-     - Interface definition (can_frame + power_request vars)
+     - Interface definition (``can_frame`` + ``power_request`` vars)
    * - ``config/config-sil-dc-canbus.yaml``
      - Example SIL configuration wiring all modules together
 
 Example Configuration
----------------------
+=====================
 
 Minimal wiring in a YAML config:
 
@@ -306,10 +376,11 @@ Minimal wiring in a YAML config:
             implementation_id: can_signals
 
 GB/T 27930 Simulator
---------------------
+====================
 
-A standalone BMS simulator is provided at ``gbt27930_sim/src/ev_simulator.cpp``.
-It simulates a battery pack connecting to the charger over a SocketCAN interface.
+A standalone BMS simulator can be used to test the module against a virtual CAN interface.
+It simulates a battery pack connecting to the charger over a SocketCAN interface and is
+expected to be built and run separately from the EVerest stack.
 
 Features:
 
@@ -325,6 +396,7 @@ Fault injection (keyboard input while running):
 
 .. list-table::
    :header-rows: 1
+   :widths: 15 85
 
    * - Key
      - Fault
@@ -347,5 +419,5 @@ To run against a virtual CAN interface::
     # Run EVerest with config-sil-dc-canbus.yaml
     manager --conf config-sil-dc-canbus.yaml
 
-    # In another terminal, run the simulator
-    ./ev_simulator   # uses can0 by default, edit main() for vcan0
+    # In another terminal, run the BMS simulator
+    ./ev_simulator   # uses can0 by default — edit main() to use vcan0

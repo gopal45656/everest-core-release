@@ -1,3 +1,4 @@
 ev_add_module(NxpNfcFrontendTokenProvider)
 ev_add_module(PN532TokenProvider)
 ev_add_module(PN7160TokenProvider)
+ev_add_module(MT628TokenProvider)

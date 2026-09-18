@@ -1,0 +1,48 @@
+description: >-
+  Interface for the EnergyReader module. Provides status and control for
+  the Modbus RS485 display write loop.
+
+vars:
+  display_write_status:
+    description: >-
+      Status of the last Modbus write cycle to the display.
+      Contains a success flag and optional error message.
+    type: object
+    properties:
+      success:
+        description: True if all register writes succeeded in the last cycle
+        type: boolean
+      error_message:
+        description: Error description if success is false
+        type: string
+      timestamp:
+        description: RFC3339 timestamp of the last write attempt
+        type: string
+
+cmds:
+  get_last_values:
+    description: Returns the last set of powermeter values that were written to the display
+    result:
+      description: Last written display values snapshot
+      type: object
+      properties:
+        voltage_dc:
+          type: number
+        current_dc:
+          type: number
+        power_kw:
+          type: number
+        energy_import_kwh:
+          type: number
+        energy_export_kwh:
+          type: number
+        max_voltage:
+          type: number
+        min_voltage:
+          type: number
+        max_current:
+          type: number
+        min_current:
+          type: number
+        timestamp:
+          type: string

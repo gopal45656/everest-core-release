@@ -1,0 +1,10 @@
+
+std::string powermeterImpl::powermeter_register_type_to_string(PowermeterRegisters r) const {
+    if (r == ENERGY_WH_IMPORT_TOTAL) return "ENERGY_WH_IMPORT_TOTAL";
+    if (r == ENERGY_WH_IMPORT_L1) return "ENERGY_WH_IMPORT_L1";
+    if (r == POWER_W_TOTAL) return "POWER_W_TOTAL";
+    if (r == VOLTAGE_V_L1) return "VOLTAGE_V_L1";
+    if (r == CURRENT_A_L1) return "CURRENT_A_L1";
+    if (r == FREQUENCY_HZ_L1) return "FREQUENCY_HZ_L1";
+    return "OTHER";
+}

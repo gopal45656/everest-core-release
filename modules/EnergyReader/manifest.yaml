@@ -1,0 +1,356 @@
+description: >-
+  EnergyReader module reads electrical measurement values from a GenericPowermeter
+  and transmits them to an external DWIN display via raw serial. Subscribes to
+  evse_manager for gun/charging state, fault detection, HLC demand values, and
+  PSU supply set-points.
+
+provides:
+  main:
+    description: Main EnergyReader implementation
+    interface: energy_reader
+    config:
+      modbus_device_id:
+        description: Slave address (legacy field, unused in serial mode)
+        type: integer
+        minimum: 1
+        maximum: 247
+        default: 1
+
+      serial_port:
+        description: Serial port for DWIN display (e.g. /dev/ttyS5)
+        type: string
+        default: /dev/ttyUSB0
+
+      baud_rate:
+        description: Baud rate for serial communication
+        type: integer
+        default: 115200
+        minimum: 1200
+        maximum: 115200
+
+      parity:
+        description: "Parity: none, even, odd"
+        type: string
+        default: none
+
+      stop_bits:
+        description: Number of stop bits (1 or 2)
+        type: integer
+        default: 1
+        minimum: 1
+        maximum: 2
+
+      data_bits:
+        description: Number of data bits (7 or 8)
+        type: integer
+        default: 8
+        minimum: 7
+        maximum: 8
+
+      publish_interval_ms:
+        description: Interval in milliseconds between each write cycle
+        type: integer
+        default: 1000
+        minimum: 100
+        maximum: 60000
+
+      fault_timeout_seconds:
+        description: Seconds to wait after plug-in before declaring fault if charging has not started
+        type: integer
+        default: 5
+        minimum: 1
+        maximum: 60
+
+      # ─── Powermeter VP Registers (actual measured values) ─────────────────────
+      reg_voltage_dc:
+        description: VP address for DC Voltage measured by powermeter (V)
+        type: integer
+        default: 100
+
+      reg_current_dc:
+        description: VP address for DC Current measured by powermeter (A)
+        type: integer
+        default: 101
+
+      reg_power_total:
+        description: VP address for Total Power (kW)
+        type: integer
+        default: 102
+
+      reg_energy_import_total:
+        description: VP address for Import Energy (kWh)
+        type: integer
+        default: 103
+
+      reg_energy_export_total:
+        description: VP address for Export Energy (kWh)
+        type: integer
+        default: 104
+
+      reg_max_voltage:
+        description: VP address for Max Voltage seen this session (V)
+        type: integer
+        default: 105
+
+      reg_min_voltage:
+        description: VP address for Min Voltage seen this session (V)
+        type: integer
+        default: 106
+
+      reg_max_current:
+        description: VP address for Max Current seen this session (A)
+        type: integer
+        default: 107
+
+      reg_min_current:
+        description: VP address for Min Current seen this session (A)
+        type: integer
+        default: 108
+
+      # ─── HLC Demand VP Registers (EV requested via ISO 15118 CurrentDemandReq) ─
+      reg_demand_voltage:
+        description: >-
+          VP address for Demand Voltage (V) — the target voltage the EV requests
+          in each ISO 15118 CurrentDemandReq (EVTargetVoltage). Sourced from
+          evse_manager ev_info.target_voltage.
+        type: integer
+        default: 109
+
+      reg_demand_current:
+        description: >-
+          VP address for Demand Current (A) — the target current the EV requests
+          in each ISO 15118 CurrentDemandReq (EVTargetCurrent). Sourced from
+          evse_manager ev_info.target_current.
+        type: integer
+        default: 110
+
+      # ─── Supply Set-Point VP Registers (EVSE commanded output to DC PSU) ───────
+      reg_charging_voltage:
+        description: >-
+          VP address for Charging Voltage (V) — the voltage set-point commanded
+          by the EVSE to the DC power supply (call_setExportVoltageCurrent).
+          Corresponds to the log line "EVSE IEC DC power supply set: 200V/5A".
+          Sourced from evse_manager ev_info.present_voltage.
+        type: integer
+        default: 111
+
+      reg_charging_current:
+        description: >-
+          VP address for Charging Current (A) — the current set-point commanded
+          by the EVSE to the DC power supply. Sourced from
+          evse_manager ev_info.present_current.
+        type: integer
+        default: 112
+
+      # ─── Icon Switch VP Registers (0=OFF/grey  1=ON/green) ───────────────────
+      reg_gun_status:
+        description: "Icon VP: 0=Unplugged, 1=Plugged"
+        type: integer
+        default: 115
+
+      reg_gun_unplugged:
+        description: "Icon VP: 1=Unplugged/Idle (default on), 0=Connected"
+        type: integer
+        default: 118
+
+      reg_charging_active:
+        description: "Icon VP: 0=Not charging, 1=Charging in progress"
+        type: integer
+        default: 116
+
+      reg_charging_complete:
+        description: "Icon VP: 0=Not done, 1=Charging completed"
+        type: integer
+        default: 117
+
+      reg_fault:
+        description: "Icon VP: 0=No fault, 1=Fault (charging did not start within fault_timeout_seconds)"
+        type: integer
+        default: 120
+
+      reg_charge_duration_hours:
+        description: VP address for session duration hours (HH)
+        type: integer
+        default: 152
+
+      reg_charge_duration_minutes:
+        description: VP address for session duration minutes (MM)
+        type: integer
+        default: 119
+
+      reg_charge_duration_seconds:
+        description: VP address for session duration seconds (SS)
+        type: integer
+        default: 153
+
+      reg_initial_soc:
+        description: VP address for initial (start-of-session) State of Charge (%)
+        type: integer
+        default: 121
+
+      reg_current_soc:
+        description: VP address for current State of Charge (%)
+        type: integer
+        default: 122
+
+      # ─── Gun 2 VP Registers ──────────────────────────────────────────────────
+      reg_voltage_dc_gun2:
+        description: VP address for DC Voltage measured by powermeter for Gun 2 (V)
+        type: integer
+        default: 200
+
+      reg_current_dc_gun2:
+        description: VP address for DC Current measured by powermeter for Gun 2 (A)
+        type: integer
+        default: 201
+
+      reg_power_total_gun2:
+        description: VP address for Total Power for Gun 2 (kW)
+        type: integer
+        default: 202
+
+      reg_energy_import_total_gun2:
+        description: VP address for Import Energy for Gun 2 (kWh)
+        type: integer
+        default: 203
+
+      reg_energy_export_total_gun2:
+        description: VP address for Export Energy for Gun 2 (kWh)
+        type: integer
+        default: 204
+
+      reg_max_voltage_gun2:
+        description: VP address for Max Voltage for Gun 2 (V)
+        type: integer
+        default: 205
+
+      reg_min_voltage_gun2:
+        description: VP address for Min Voltage for Gun 2 (V)
+        type: integer
+        default: 206
+
+      reg_max_current_gun2:
+        description: VP address for Max Current for Gun 2 (A)
+        type: integer
+        default: 207
+
+      reg_min_current_gun2:
+        description: VP address for Min Current for Gun 2 (A)
+        type: integer
+        default: 208
+
+      reg_demand_voltage_gun2:
+        description: VP address for Demand Voltage for Gun 2 (V)
+        type: integer
+        default: 209
+
+      reg_demand_current_gun2:
+        description: VP address for Demand Current for Gun 2 (A)
+        type: integer
+        default: 210
+
+      reg_charging_voltage_gun2:
+        description: VP address for Charging Voltage for Gun 2 (V)
+        type: integer
+        default: 211
+
+      reg_charging_current_gun2:
+        description: VP address for Charging Current for Gun 2 (A)
+        type: integer
+        default: 212
+
+      reg_gun_status_gun2:
+        description: "Gun 2 Icon VP: 0=Unplugged, 1=Plugged"
+        type: integer
+        default: 215
+
+      reg_charging_active_gun2:
+        description: "Gun 2 Icon VP: 0=Not charging, 1=Charging in progress"
+        type: integer
+        default: 216
+
+      reg_charging_complete_gun2:
+        description: "Gun 2 Icon VP: 0=Not done, 1=Charging completed"
+        type: integer
+        default: 217
+
+      reg_gun_unplugged_gun2:
+        description: "Gun 2 Icon VP: 1=Unplugged/Idle, 0=Connected"
+        type: integer
+        default: 218
+
+      reg_charge_duration_hours_gun2:
+        description: VP address for Gun 2 session duration hours (HH)
+        type: integer
+        default: 223
+
+      reg_charge_duration_minutes_gun2:
+        description: VP address for Gun 2 session duration minutes (MM)
+        type: integer
+        default: 224
+
+      reg_charge_duration_seconds_gun2:
+        description: VP address for Gun 2 session duration seconds (SS)
+        type: integer
+        default: 225
+
+      reg_fault_gun2:
+        description: "Gun 2 Icon VP: 0=No fault, 1=Fault"
+        type: integer
+        default: 220
+
+      reg_initial_soc_gun2:
+        description: VP address for Gun 2 initial (start-of-session) State of Charge (%)
+        type: integer
+        default: 221
+
+      reg_current_soc_gun2:
+        description: VP address for Gun 2 current State of Charge (%)
+        type: integer
+        default: 222
+
+      # ─── Scaling Factors ──────────────────────────────────────────────────────
+      voltage_scale:
+        description: Multiply voltage before writing to display (e.g. 10.0 → 236V becomes 2360)
+        type: number
+        default: 10.0
+
+      current_scale:
+        description: Multiply current before writing to display
+        type: number
+        default: 10.0
+
+      power_scale:
+        description: Multiply power (kW) before writing to display
+        type: number
+        default: 100.0
+
+      energy_scale:
+        description: Multiply energy (kWh) before writing to display
+        type: number
+        default: 10.0
+
+      soc_scale:
+        description: Multiply SOC (%) before writing to display (e.g. 10.0 → 80% becomes 800)
+        type: number
+        default: 10.0
+
+      debug:
+        description: Enable verbose debug logging
+        type: boolean
+        default: false
+
+requires:
+  powermeter:
+    interface: powermeter
+    min_connections: 1
+    max_connections: 8
+  evse_manager:
+    interface: evse_manager
+    min_connections: 1
+    max_connections: 8
+
+metadata:
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - Rathinavel Pandian

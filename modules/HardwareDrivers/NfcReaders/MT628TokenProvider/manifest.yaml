@@ -1,0 +1,52 @@
+description: MT628 series NFC/RFID card reader token provider. Reads card UID via serial port using MT318-620V2.4 protocol and publishes it as an auth token.
+provides:
+  main:
+    description: Implementation of MT628 NFC/RFID token provider
+    interface: auth_token_provider
+    config:
+      serial_port:
+        description: Serial port the MT628 hardware is connected to
+        type: string
+        default: /dev/ttyUSB0
+      baud_rate:
+        description: Serial baud rate to use when communicating with MT628 hardware
+        type: integer
+        minimum: 9600
+        maximum: 230400
+        default: 115200
+      read_timeout_ms:
+        description: Time in milliseconds to wait between card polling attempts
+        type: integer
+        minimum: 100
+        maximum: 60000
+        default: 500
+      token_debounce_interval_ms:
+        description: Minimal wait time in ms until the same token will be published again (debounce interval)
+        type: integer
+        default: 3000
+        minimum: 500
+        maximum: 10000
+      debug:
+        description: Show debug output on command line
+        type: boolean
+        default: false
+      buzz_on_card_detected:
+        description: Trigger a buzzer beep on the reader when a card is detected
+        type: boolean
+        default: true
+      buzz_count:
+        description: Number of buzzer beeps on card detection
+        type: integer
+        minimum: 1
+        maximum: 10
+        default: 1
+      buzz_duration_ms:
+        description: Duration of each buzzer beep in milliseconds
+        type: integer
+        minimum: 50
+        maximum: 2000
+        default: 100
+metadata:
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - Himanshu

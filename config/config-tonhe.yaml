@@ -1,0 +1,22 @@
+# Standalone InfyPower_BEG1K075G driver — no charger stack, no pre-configured addresses.
+#
+# Module addresses are auto-discovered from incoming M_C_1 frames — no address
+# configuration needed. Just connect the CAN bus and run.
+#
+# Usage:
+#   # Start one simulator per PSU (on separate systems or local terminals)
+#   ./psu_sim --iface can0 --node 1
+#   ./psu_sim --iface can0 --node 2
+#   ...
+#   manager --conf config-tonhe.yaml
+
+active_modules:
+  powersupply_dc:
+    module: TonhePower
+    config_module:
+      can_device: main_mcan0
+      heartbeat_timeout_ms: 5000
+      overtemperature_limit_C: 85.0
+      per_module_rated_power_W: 30000.0
+      conversion_efficiency_export: 0.95
+

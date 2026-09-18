@@ -13,7 +13,9 @@
 #include "../InfyPower_BEG1K075G.hpp"
 
 // ev@75ac1216-19eb-4182-a85c-820f1fc2c091:v1
-// insert your custom include headers here
+#include <atomic>
+#include <memory>
+#include <sstream>
 // ev@75ac1216-19eb-4182-a85c-820f1fc2c091:v1
 
 namespace module {
@@ -51,14 +53,34 @@ private:
     virtual void ready() override;
 
     // ev@3370e4dd-95f4-47a9-aaec-ea76f34a66c9:v1
-    std::mutex settings_mutex;
-    double exportVoltage{0.};
-    double exportCurrentLimit{0.};
-    double minImportVoltage{0.};
-    double importCurrentLimit{0.};
-    types::power_supply_DC::Capabilities caps;
 
-    types::power_supply_DC::Mode last_publish_mode{types::power_supply_DC::Mode::Off};
+    // Cached setpoints (atomic to allow concurrent signal callbacks)
+    std::atomic<double> exportVoltage{0.};
+    std::atomic<double> exportCurrentLimit{0.};
+    std::atomic<double> minImportVoltage{0.};
+    std::atomic<double> importCurrentLimit{0.};
+
+    // Mode/phase tracking
+    std::atomic<types::power_supply_DC::Mode>         mode{types::power_supply_DC::Mode::Off};
+    std::atomic<types::power_supply_DC::ChargingPhase> phase{
+        types::power_supply_DC::ChargingPhase::CableCheck};
+
+    // Published capabilities (updated whenever active module count changes)
+    types::power_supply_DC::Capabilities caps;
+    std::mutex                            caps_mutex;
+
+    // Throttle counter for voltage_current publishing (~10 Hz)
+    uint8_t throttle_cnt{0};
+
+    // Track last known active module count to detect hot-plug/unplug
+    size_t last_module_count{0};
+
+    bool firsttime{true};
+
+    // Error helpers
+    std::string map_error_string_to_power_supply_dc(const std::string& infy_error) const;
+    std::string format_module_error_message(uint8_t node_id, const std::string& error,
+                                            bool active) const;
     // ev@3370e4dd-95f4-47a9-aaec-ea76f34a66c9:v1
 };
 

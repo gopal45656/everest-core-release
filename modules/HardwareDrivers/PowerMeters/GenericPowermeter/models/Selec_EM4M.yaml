@@ -1,0 +1,296 @@
+# Selec EM4M (3-Phase AC Energy Meter) register map for EVerest's GenericPowermeter
+#
+# (<start_register> of length <num_registers>) * <multiplier> * 10^(<exponent_register>)
+#
+# if <start_register> is "0", then this value does not exist / is not confirmed for this powermeter
+#
+# use <multiplier> to manually scale (e.g. set to 0.001 if device returns "kWh", but the parameter is "Wh")
+# and <exponent_register> to scale by device value ("0" = no exponent register, multiplier must be set manually)
+#
+# ---------------------------------------------------------------------------
+# WHY THE ORIGINAL "3xxxx LABEL" ADDRESSES IN THIS FILE WERE REMOVED
+# ---------------------------------------------------------------------------
+# An earlier version of this file used Selec's documented 3xxxx label
+# convention directly as start_register (voltage_V: 30001, current_A: 30007,
+# power_W: 30013, frequency_Hz: 30071, energy_Wh_import: 30073,
+# energy_Wh_export: 30075), assuming protocol_address = label - 30001.
+#
+# This is explicitly disproven by read_mfm.py's own docstring and by the
+# live Modbus Poll capture referenced in it: label 30001 would predict
+# protocol address 0, but the CONFIRMED working voltage register on this
+# hardware is protocol address 1000 (label 31001) - a full 1000-register
+# offset from what the naive label conversion predicts.
+#
+# Applying that same "+1000" correction uniformly to the other fields is
+# NOT safe either: doing so would place current_A at protocol address 1006,
+# but 1006 has already been independently confirmed (via a separate live
+# capture: registers 1000/1002/1004 = per-phase voltages, 1006 = their
+# arithmetic mean) to be the AVERAGE/TOTAL VOLTAGE register, not current.
+# That direct collision proves the vendor's documented label block does not
+# sit at a uniform offset from this device's actual register layout on this
+# hardware - so guessing shifted addresses for current/power/frequency/
+# energy would very likely be wrong, not just unconfirmed.
+#
+# ---------------------------------------------------------------------------
+# ADDRESSING CONVENTION USED BELOW (driver-verified)
+# ---------------------------------------------------------------------------
+# CONFIRMED against the GenericPowermeter driver source (powermeterImpl.cpp,
+# read_register()): for FC04 / READ_INPUT_REGISTER (function_code_start_reg:
+# 4, used throughout this file), the driver computes the actual wire address
+# as:
+#     wire_address = start_register - modbus_base_address
+# So start_register below is set to (desired_wire_address + modbus_base_address),
+# assuming modbus_base_address: 1000 (as configured for this device elsewhere
+# in the EVerest config).
+#
+# DATA FORMAT: This device returns 16-bit unsigned integers (NOT 32-bit floats),
+# so all entries below use data_format: "uint16". The GenericPowermeter driver
+# will decode them as integers and then apply the multiplier.
+#
+# ---------------------------------------------------------------------------
+# CONFIRMED (voltage only)
+# ---------------------------------------------------------------------------
+# Live captures (read_mfm.py) confirmed:
+#   Register 1000 = per-phase V1   (L1)
+#   Register 1002 = per-phase V2   (L2)
+#   Register 1004 = per-phase V3   (L3)
+#   Register 1006 = average/total voltage (mean of V1/V2/V3)
+# Raw values are plain 16-bit unsigned integers scaled by /100 (NOT 32-bit
+# floats), so num_registers: 1 and multiplier: 0.01.
+#
+# ---------------------------------------------------------------------------
+# NOT YET CONFIRMED - left as start_register: 0 (unavailable) until a real
+# capture identifies the correct addresses. Do NOT fill these in from the
+# vendor's documented 3xxxx labels alone - see explanation above.
+# ---------------------------------------------------------------------------
+
+energy_Wh_import:
+  start_register: 1076
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 0.001
+  exponent_register: 0
+  function_code_exp_reg: 4
+  data_format: "uint16"
+  L1:
+    start_register: 1076
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L2:
+    start_register: 1078
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L3:
+    start_register: 1080
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+
+energy_Wh_export:
+  start_register: 1082
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 0.001
+  exponent_register: 0
+  function_code_exp_reg: 4
+  data_format: "uint16"
+  L1:
+    start_register: 1082
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L2:
+    start_register: 1084
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L3:
+    start_register: 1086
+    function_code_start_reg: 4
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+
+power_W:
+  start_register: 1040
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 4
+  data_format: "uint16"
+  L1:
+    start_register: 1036
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L2:
+    start_register: 1038
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L3:
+    start_register: 1040
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+
+# CONFIRMED (Modbus Poll capture via read_mfm.py):
+# average/total voltage at wire addr 1006, per-phase at wire addr
+# 1000/1002/1004. start_register values are (wire_addr + modbus_base_address)
+# per the driver's subtraction behavior - see note above.
+# Data format is uint16 (NOT float32).
+voltage_V:
+  start_register: 1006
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 0.01
+  exponent_register: 0
+  function_code_exp_reg: 4
+  data_format: "uint16"
+  L1:
+    start_register: 1000
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 0.01
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L2:
+    start_register: 1002
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 0.01
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L3:
+    start_register: 1004
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 0.01
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+
+reactive_power_VAR:
+  start_register: 1042
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 0.001
+  exponent_register: 0
+  function_code_exp_reg: 4
+  data_format: "uint16"
+  L1:
+    start_register: 0
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L2:
+    start_register: 0
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L3:
+    start_register: 0
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+
+current_A:
+  start_register: 1022
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 4
+  data_format: "uint16"
+  L1:
+    start_register: 1016
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+    data_format: "uint16"
+  L2:
+    start_register: 1018
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+  L3:
+    start_register: 1020
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+
+frequency_Hz:
+  start_register: 1056
+  function_code_start_reg: 4
+  num_registers: 1
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 4
+  L1:
+    start_register: 0
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+  L2:
+    start_register: 0
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+  L3:
+    start_register: 0
+    function_code_start_reg: 4
+    num_registers: 1
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 4
+

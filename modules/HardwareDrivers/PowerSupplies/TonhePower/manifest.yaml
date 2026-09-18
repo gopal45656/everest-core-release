@@ -1,0 +1,60 @@
+description: >-
+  Driver for power supply modules using the Tonhe
+  CAN protocol (THJS-TXXY-0060 V1.2). Supports up to 240 modules on a single
+  125 kbps CAN bus. Module addresses are auto-discovered from incoming M_C_1
+  frames — no pre-configuration required. Sends C_M_24 unicast setpoints per
+  module for equal current distribution, plus C_M_1/C_M_2/C_M_3 broadcasts
+  for start/stop, parameter setting, and keepalive.
+config:
+  can_device:
+    description: CAN interface name (e.g. "can0")
+    type: string
+    default: can0
+  module_addresses:
+    description: >-
+      Optional comma-separated list of module node IDs to pre-populate
+      (e.g. "1,2,3,4,5,6"). If empty or omitted, modules are auto-discovered
+      from the first M_C_1 frame received from each address.
+      Set to "0" only for single-module broadcast mode (legacy).
+    type: string
+    default: ""
+  heartbeat_timeout_ms:
+    description: >-
+      Time in milliseconds without a status response from a module before it is
+      considered offline. Must be greater than the module's internal CAN timeout
+      (10 000 ms per the V1.13 spec) to avoid an overcurrent hazard.
+      On embedded hardware with slow storage (eMMC/SD), use a higher value
+      (e.g. 60000) to survive OS-level IRQ delays without false timeouts.
+      Recommended value: 60 000.
+    type: integer
+    default: 60000
+  overtemperature_limit_C:
+    description: >-
+      Module temperature threshold in degrees Celsius. When any module exceeds
+      this value the controller reduces that module's current allocation and
+      raises an OverTemperature error. Set to 0 to disable.
+    type: number
+    default: 85.0
+  conversion_efficiency_export:
+    description: AC-to-DC conversion efficiency used when reporting capabilities (0.0–1.0).
+    type: number
+    default: 0.95
+  per_module_rated_power_W:
+    description: >-
+      Rated output power in Watts of each individual BEG1K075G module. Used
+      together with module_addresses to calculate aggregate capabilities.
+      The BEG1K075G is rated at 30 000 W.
+    type: number
+    default: 30000.0
+requires:
+  evse_manager:
+    interface: evse_manager
+provides:
+  main:
+    description: Main interface
+    interface: power_supply_DC
+    config: {}
+metadata:
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+  - Cornelius Claussen

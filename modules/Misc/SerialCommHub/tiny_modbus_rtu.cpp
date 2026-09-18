@@ -90,6 +90,17 @@ static std::string hexdump(const uint8_t* msg, int msg_len) {
     return ss.str();
 }
 
+static std::string describe_registers(const std::vector<uint16_t>& regs) {
+    std::stringstream ss;
+    for (size_t i = 0; i < regs.size(); i++) {
+        if (i != 0)
+            ss << ", ";
+        ss << "[" << i << "]=0x" << std::nouppercase << std::setfill('0') << std::setw(4) << std::hex << regs[i]
+           << "(" << std::dec << regs[i] << ")";
+    }
+    return ss.str();
+}
+
 static void append_checksum(uint8_t* msg, int msg_len) {
     if (msg_len < 5)
         return;
@@ -485,6 +496,23 @@ std::vector<uint16_t> TinyModbusRTU::txrx_impl(uint8_t device_address, FunctionC
         // clear input and output buffer
         tcflush(fd, TCIOFLUSH);
 
+        if (function == FunctionCode::WRITE_SINGLE_HOLDING_REGISTER) {
+            EVLOG_info << fmt::format("Modbus TX: device={} fn={} (write single) register={} value=0x{:04x}({})",
+                                       device_address, FunctionCode_to_string_with_hex(function),
+                                       first_register_address, request.at(0), request.at(0));
+        } else if (function == FunctionCode::WRITE_MULTIPLE_HOLDING_REGISTERS) {
+            EVLOG_info << fmt::format("Modbus TX: device={} fn={} (write multiple) start={} count={} data: {}",
+                                       device_address, FunctionCode_to_string_with_hex(function),
+                                       first_register_address, register_quantity, describe_registers(request));
+        } else {
+            EVLOG_info << fmt::format("Modbus TX: device={} fn={} (read) start={} count={}", device_address,
+                                       FunctionCode_to_string_with_hex(function), first_register_address,
+                                       register_quantity);
+        }
+
+        // Log raw TX frame in hex
+        EVLOG_info << fmt::format("Modbus TX RAW FRAME ({}B): {}", req.size(), hexdump(req.data(), req.size()));
+
         // write to serial port
         rxtx_gpio.set(false);
 
@@ -517,7 +545,30 @@ std::vector<uint16_t> TinyModbusRTU::txrx_impl(uint8_t device_address, FunctionC
         // wait for reply
         uint8_t rxbuf[MODBUS_MAX_REPLY_SIZE];
         int bytes_read_total = read_reply(rxbuf, sizeof(rxbuf));
-        return decode_reply(rxbuf, bytes_read_total, device_address, function);
+
+        if (bytes_read_total == 0) {
+            EVLOG_debug << "Modbus RX: no bytes received (timeout)";
+            // falls through to decode_reply below, which will throw TimeoutException as before
+        } else {
+            // Log raw RX frame in hex
+            EVLOG_info << fmt::format("Modbus RX RAW FRAME ({}B): {}", bytes_read_total, hexdump(rxbuf, bytes_read_total));
+        }
+
+        try {
+            auto result = decode_reply(rxbuf, bytes_read_total, device_address, function);
+            EVLOG_info << fmt::format("Modbus RX: device={} fn={} registers({}): {}", device_address,
+                                       FunctionCode_to_string_with_hex(function), result.size(),
+                                       describe_registers(result));
+            return result;
+        } catch (const TinyModbusException& e) {
+            if (bytes_read_total > 0) {
+                // decode failed (bad CRC, wrong address/function, exception reply, etc.) - keep the raw
+                // bytes here since they're the only useful diagnostic once decoding itself is unreliable
+                EVLOG_debug << fmt::format("Modbus RX (size {}, decode failed: {}): {}", bytes_read_total, e.what(),
+                                           hexdump(rxbuf, bytes_read_total));
+            }
+            throw;
+        }
     }
     return std::vector<uint16_t>();
 }

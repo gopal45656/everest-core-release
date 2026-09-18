@@ -1,0 +1,227 @@
+# (<start_register> of length <num_registers>) * <multiplier> * 10^(<exponent_register>)
+#
+# if <start_register> is "0", then this value does not exist in the powermeter
+#
+# use <multiplier> to manually scale (e.g. set to 0.001 if device returns "kWh", but the parameter is "Wh")
+# and <exponent_register> to scale by device value
+#
+# if <exponent_register> is "0", then no exponent register exists and multiplier needs to be set accordingly
+#
+# if measuring AC, the first level of registers is always "total/sum" of a certain value and the L1/2/3 registers are for the distinct phases
+# if measuring DC, only use the first level of registers
+#
+# NOTE on this device (Elmeasure EDC2150 / EDC2150D / EDC2450 / EDC2450D / EDC2450H):
+# - Register map documents "44xxx" Modicon-style addresses (4xxxx = holding register, FC03).
+#   CONFIRMED via live Modbus capture (read_edc2150.py, slave ID 2, FC03, addr=4100 qty=100)
+#   that the correct conversion is PLC_addr - 40001, e.g. 44101 -> 4100 (NOT -40000/4101 as
+#   previously assumed). This matches modbus_base_address: 4100 in the EVerest config, which
+#   is exactly the address used in the live TX frame. Register offsets below are set
+#   accordingly: Voltage=4100, Current CH1=4102, Watts CH1=4104, KWh Received CH1=4106,
+#   KWh Delivered CH1=4112.
+# - All values are Float (32-bit / 2 registers), matching the "Data Type: Float" column.
+# - Only CH1 is mapped below (single meter point). CH2/CH3/CH4 in the map are separate
+#   channels on the same device, not L1/L2/L3 phases, so L1/L2/L3 are left unset (0).
+# - "KWh Delivered CH1" is mapped to energy_Wh_import (energy delivered to the load/EV),
+#   and "KWh Received CH1" is mapped to energy_Wh_export (energy received back from the
+#   load, e.g. regen/V2G). Confirm this matches your wiring/CT orientation before use.
+#   NOTE: live capture showed KWh Delivered CH1 reading NEGATIVE (-141.79). If energy_Wh_import
+#   is expected to always be positive, check CT polarity / wiring before trusting sign as-is.
+# - No frequency or reactive power registers are documented for this device, so those
+#   blocks are left as start_register: 0 (not available).
+
+energy_Wh_import:
+  start_register: 4106
+  function_code_start_reg: 3
+  num_registers: 2
+  multiplier: 0.001
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+energy_Wh_export:
+  start_register: 4112
+  function_code_start_reg: 3
+  num_registers: 2
+  multiplier: 0.001
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+power_W:
+  start_register: 4104
+  function_code_start_reg: 3
+  num_registers: 2
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+voltage_V:
+  start_register: 4100
+  function_code_start_reg: 3
+  num_registers: 2
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+reactive_power_VAR:
+  start_register: 0
+  function_code_start_reg: 3
+  num_registers: 0
+  multiplier: 0.001
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+current_A:
+  start_register: 4102
+  function_code_start_reg: 3
+  num_registers: 2
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+frequency_Hz:
+  start_register: 0
+  function_code_start_reg: 3
+  num_registers: 0
+  multiplier: 1
+  exponent_register: 0
+  function_code_exp_reg: 3
+  L1:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L2:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3
+  L3:
+    start_register: 0
+    function_code_start_reg: 3
+    num_registers: 0
+    multiplier: 1
+    exponent_register: 0
+    function_code_exp_reg: 3

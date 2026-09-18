@@ -1,310 +1,494 @@
-.. _chademo_module:
+.. _everest_modules_handwritten_Chademo:
 
+*******************************************
 Chademo
-=======
+*******************************************
+
+:ref:`Link <everest_modules_Chademo>` to the module's reference.
 
 Overview
---------
+========
 
 The ``Chademo`` module implements the **CHAdeMO DC fast charging protocol** within EVerest.
-It handles the full CHAdeMO handshake and charging session over a SocketCAN interface,
-communicating directly with the EV's Battery Management System (BMS) and coordinating
-with the DC power supply and board support package (BSP).
+It handles the full CHAdeMO handshake and charging session over a SocketCAN interface via
+the ``CANBus`` module, communicates with the EV's Battery Management System (BMS), and
+coordinates with the board support package (BSP) for contactor control.
+
+The module does **not** drive the DC power supply directly. Instead, it publishes
+``power_request`` objects via the ``can_signal_receiver`` interface. An ``EvseManager``
+instance (or equivalent) subscribes to that variable and translates it into
+``powersupply_DC_set()`` calls.
 
 .. code-block:: text
 
     EV (BMS)
-      │  CAN frames (0x100, 0x101, 0x102)
+      │  CAN frames (0x100, 0x101, 0x102) — 11-bit standard IDs
       ▼
-    CAN Bus (main_mcan0, 500 kbps)
-      │
+    CANBus module  (r_can_bus)
+      │  last_frame var → subscribe_last_frame callback
       ▼
     Chademo module
-      ├─ r_power_supply (power_supply_DC) ──► InfyPower_BEG1K075G
-      │                                           └─ CAN → Physical PSU
-      └─ r_bsp (evse_board_support)       ──► YetiSimulator
-                                                  └─ Contactor control / GPIO
+      ├─ p_main  (chademo interface)
+      │    └─ handle_start_charging() / handle_stop_charging()
+      │
+      ├─ p_can_signals  (can_signal_receiver interface)
+      │    ├─ publish_can_frame()      ──────────────────────► EvseManager (stop detection)
+      │    └─ publish_power_request()  ──────────────────────► EvseManager → PSU set-point
+      │
+      └─ r_bsp  (evse_board_support interface)
+           ├─ call_enable(true/false)          — EVSE enable/disable
+           └─ call_allow_power_on({true/false}) — contactor open/close
+
 
 Architecture
-------------
+============
 
-The module runs a single background thread (``run_state_machine()``) that:
+On ``init()``, the module opens the CAN interface via ``r_can_bus->call_open("main_mcan0")``
+and subscribes to ``last_frame``. Every received frame:
 
-1. Reads incoming CAN frames from the EV in a non-blocking loop
-2. Drives the EVSE-side CHAdeMO state machine
-3. Sends periodic heartbeat frames (0x108, 0x109) to the EV
-4. Controls the power supply and contactors via EVerest interfaces
+1. Resets the 1-second CAN watchdog.
+2. Is forwarded raw to EvseManager via ``p_can_signals->publish_can_frame()``.
+3. Is dispatched into the state machine via ``handle_incoming_can()``.
 
-CHAdeMO Protocol — CAN Message Map
-------------------------------------
+On ``ready()``, a background thread is started that runs ``run_state_machine()`` in a loop
+at ``publish_interval_ms`` intervals.
 
-+--------+------------------+----------+------------------------------------------+
-| CAN ID | Direction        | Name     | Description                              |
-+========+==================+==========+==========================================+
-| 0x100  | EV → EVSE        | EV Batt  | Target voltage, current, SOC, temp       |
-+--------+------------------+----------+------------------------------------------+
-| 0x101  | EV → EVSE        | EV Time  | Remaining charge time, target SOC        |
-+--------+------------------+----------+------------------------------------------+
-| 0x102  | EV → EVSE        | EV Ctrl  | Contactor status, fault flags            |
-+--------+------------------+----------+------------------------------------------+
-| 0x108  | EVSE → EV        | EVSE Hb  | Charger status, present V/I, IN1 signal  |
-+--------+------------------+----------+------------------------------------------+
-| 0x109  | EVSE → EV        | EVSE Par | IN2 (charge permission), max V/I, faults |
-+--------+------------------+----------+------------------------------------------+
+CHAdeMO CAN Frame Map
+=====================
+
+All CHAdeMO frames use **11-bit standard CAN IDs** (not extended).
+
+EV → EVSE frames (received)
+-----------------------------
+
+**0x100 — EV Battery Parameters**
+
+Decoded in ``WAIT_FOR_EV_100`` state only.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 10 80
+
+   * - Byte
+     - Byte
+     - Field
+   * - 0
+     - 1
+     - Target charge voltage (V), little-endian uint16: ``(data[1] << 8) | data[0]``
+   * - 2
+     - —
+     - Maximum charge current (A), uint8
+
+**0x101 — EV Status / SOC**
+
+Decoded in ``WAIT_FOR_CONFIRMATION`` state only. SOC is read from ``data[2]``.
+
+**0x102 — EV Control**
+
+Decoded in any state.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 20 70
+
+   * - Byte
+     - Bit / value
+     - Field
+   * - 0
+     - bit 0
+     - EV contactors closed (``data[0] & 0x01``). Triggers ``CHARGING_OPERATIONAL`` when set in ``WAIT_FOR_102``.
+   * - 4
+     - 0x01
+     - EV overtemperature / fault flag. Triggers ``FAULT`` state immediately from any state.
+
+EVSE → EV frames (transmitted)
+--------------------------------
+
+**0x108 — EVSE Heartbeat**
+
+Sent on every loop tick in most states. Layout:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 90
+
+   * - Byte
+     - Content
+   * - 0
+     - Charger status: always ``0x01``
+   * - 1
+     - Max output voltage low byte (little-endian)
+   * - 2
+     - Max output voltage high byte (little-endian)
+   * - 3
+     - Max output current (A)
+   * - 4
+     - IN1 signal: ``0x01`` = HIGH (charger available), ``0x00`` = LOW
+   * - 5
+     - Charger temperature (°C), hardcoded to 35
+
+**0x109 — EVSE Parameters / Permission**
+
+Sent when asserting or revoking charge permission. Layout:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 90
+
+   * - Byte
+     - Content
+   * - 0
+     - Fault flag: ``0x01`` = fault present, ``0x00`` = normal
+   * - 1
+     - IN2 (charge permission): ``0x01`` = permission granted, ``0x00`` = revoked
+   * - 2
+     - Max voltage low byte (little-endian)
+   * - 3
+     - Max voltage high byte (little-endian)
+   * - 4
+     - Max current (A)
+   * - 5
+     - Reserved (``0x00``)
+   * - 6
+     - Hardcoded ``0x02``
 
 State Machine
--------------
+=============
 
-The EVSE-side state machine (``EVSE_STATE``) drives the charging session:
+The ``EVSE_STATE`` enum drives the charging session. The background thread advances
+through states on every loop tick or in response to incoming CAN frames.
 
 .. code-block:: text
 
     WAIT_FOR_PLUG
-      │  GPIO detects EV presence (pin goes LOW)
-      │  BSP enabled, heartbeat 0x108 started
+      │  gpioget reads /dev/gpiochipN line M — LOW = EV present
+      │  r_bsp->call_enable(true), heartbeat 0x108 started
       ▼
     WAIT_FOR_EV_100
-      │  EV sends 0x100 (target voltage/current)
+      │  Sends 0x108 every tick
+      │  Polls GPIO — if pin goes HIGH: unplug detected, back to WAIT_FOR_PLUG
+      │  Waits for 0x100 from EV
       ▼
-    SEND_EVSE_PARAMS_108
-      │  Log: "Scaling Power Supply to match EV Battery Voltage"
+    SEND_EVSE_PARAMS_108  (triggered by 0x100 receipt)
+      │  Logs: "Scaling Power Supply to match EV Battery Voltage..."
+      │  Sends 0x108
       ▼
     PRECHARGE
-      │  Continue sending 0x108
+      │  Sends 0x108, resets watchdog
       ▼
     WAIT_FOR_CONFIRMATION
-      │  EV sends 0x101 (SOC received)
+      │  Sends 0x108 every tick
+      │  Watchdog active from here — 1s timeout → FAULT
+      │  Waits for 0x101 from EV (SOC)
       ▼
-    SEND_IN2_109
-      │  Send 0x109 with IN2=HIGH (charge permission)
-      │  BSP: call_allow_power_on(true)
-      │  Log: "Signal d1 (Charge Permission) HIGH via BSP"
+    SEND_IN2_109  (triggered by 0x101 receipt)
+      │  Sends 0x109 with IN2=HIGH (permission granted)
+      │  r_bsp->call_allow_power_on({allow_power_on: true})
       ▼
     WAIT_FOR_102
-      │  EV sends 0x102 with contactor closed bit
-      │  Log: "Relays Closed. Commencing Power Delivery."
+      │  Sends 0x108 + 0x109 (permission) every tick
+      │  Sends BSP power-on command once (guarded by bsp_signal_sent flag)
+      │  Waits for 0x102 with contactors-closed bit
       ▼
-    CHARGING_OPERATIONAL  ──► handle_start_charging()
-      │  PSU: setMode(Export, Charging)
-      │  PSU: setExportVoltageCurrent(V, I) — ramps up 5V per loop
-      │  Log: ">>> [POWER UPDATE] <<< Target: X kW / Actual: Y kW"
-      │  When V reaches target: Log: "!!! TARGET REACHED !!!"
+    CHARGING_OPERATIONAL  (triggered by 0x102 contactors-closed bit)
+      │  Calls handle_start_charging() on every tick
+      │  Ramps simulated_actual_v by +5V per tick until target reached
+      │  Publishes power_request {voltage_V, current_A, charge_mode:0} every tick
+      │  Sends 0x108 with current simulated voltage every tick
+      │  Logs power update every 2 seconds
+      │  When simulated_actual_v >= target OR SoC >= 100% → FINISHED
       ▼
     FINISHED
       │  handle_stop_charging()
-      │  PSU: IN2 LOW → EV opens contactors
-      │  BSP: call_allow_power_on(false)
-      │  Log: "Shutting down DC Power Supply."
-      │  Log: "Physical Contactors OPENED via BSP."
+      │  Publishes power_request {voltage_V:0, current_A:0} → PSU off signal
+      │  Sends 0x109 with IN2=LOW → EV opens contactors
+      │  r_bsp->call_allow_power_on({allow_power_on: false})
+      │  running = false → thread exits
       ▼
     (session complete)
 
-    FAULT (any state)
-      │  CAN timeout (1s watchdog) or EV fault flag in 0x102
-      └─ handle_stop_charging() → FAULT state
+    FAULT (from any state except WAIT_FOR_PLUG, WAIT_FOR_EV_100, SEND_EVSE_PARAMS_108)
+      │  Sends 0x109 with fault=true
+      │  handle_stop_charging()
+      │  running = false → thread exits
+
+.. note::
+   The enum also contains ``HANDSHAKE``, ``CHG_PARAMETERS``, and ``CHARGING`` states
+   that are defined but never reached in the current implementation. They are dead code.
 
 Voltage Ramp
-~~~~~~~~~~~~
+------------
 
-During ``CHARGING_OPERATIONAL``, the module ramps the output voltage from 0V to the
-EV's requested voltage in 5V steps per loop iteration (``publish_interval_ms``).
-This simulates a soft-start precharge ramp. The power supply receives a new
-``setExportVoltageCurrent`` call on every loop tick until the target is reached.
+During ``CHARGING_OPERATIONAL``, a ``static float simulated_actual_v`` local to
+``handle_start_charging()`` starts at 0.0 V and increases by 5.0 V per loop tick
+(every ``publish_interval_ms`` ms) until it reaches the EV's requested target voltage.
+
+On every tick, a ``power_request`` is published with the current ``simulated_actual_v``
+and the EV's requested current. The EvseManager receives this and calls
+``powersupply_DC_set(simulated_actual_v, target_i)`` on the DC PSU — this is the
+soft-start ramp.
+
+.. note::
+   Because ``simulated_actual_v`` is a ``static`` local variable, it does **not** reset
+   between calls. If ``handle_start_charging()`` is ever re-entered after a partial session,
+   the ramp will continue from where it left off rather than starting from 0 V.
+
+Power Request Publishing
+========================
+
+The ``can_signals`` (``can_signal_receiver``) interface is the integration point
+between this module and EvseManager:
+
+- **During charging** — ``handle_start_charging()`` publishes on every loop tick:
+
+  .. code-block:: json
+
+     { "voltage_V": <simulated_actual_v>, "current_A": <ev_req_i>, "charge_mode": 0 }
+
+  ``charge_mode: 0`` indicates constant current (CC) mode.
+
+- **On stop or fault** — ``handle_stop_charging()`` publishes a zero request to signal
+  EvseManager to turn the PSU off:
+
+  .. code-block:: json
+
+     { "voltage_V": 0.0, "current_A": 0.0, "charge_mode": 0 }
+
+- **Every received frame** — the raw CAN frame object is forwarded via
+  ``publish_can_frame()`` so EvseManager can detect stop conditions (e.g. 0x102 fault).
+
+Safety Features
+===============
+
+CAN Watchdog
+------------
+
+Active from ``WAIT_FOR_CONFIRMATION`` state onwards (not active during
+``WAIT_FOR_PLUG``, ``WAIT_FOR_EV_100``, ``SEND_EVSE_PARAMS_108``, or ``FAULT``).
+
+If no CAN frame is received for **1 second**, the module transitions to ``FAULT``::
+
+    Emergency: CAN Timeout (1s). Car disconnected or crashed.
+
+EV Fault Detection
+------------------
+
+Frame 0x102, ``data[4] == 0x01`` is interpreted as an EV overtemperature or fault
+condition. This triggers an immediate transition to ``FAULT`` from **any** state::
+
+    EV reported Overtemp/Fault!
+
+GPIO Presence Detection
+-----------------------
+
+EV presence is read by calling ``gpioget`` as a subprocess:
+
+- In ``WAIT_FOR_PLUG``: uses path ``/dev/gpiochipN``
+- In ``WAIT_FOR_EV_100``: uses path ``gpiochipN`` (no ``/dev/`` prefix)
+
+.. warning::
+   There is a path inconsistency between the two states. ``WAIT_FOR_PLUG`` uses
+   ``/dev/gpiochipN`` (correct) while ``WAIT_FOR_EV_100`` uses ``gpiochipN`` (missing
+   ``/dev/`` prefix). This may cause the unplug detection to silently fail on some systems.
 
 Interfaces
-----------
+==========
 
 Provides
-~~~~~~~~
+--------
 
 ``main`` (``chademo``)
-  Exposes ``start_charging()`` and ``stop_charging()`` commands. These are called
-  internally by the state machine — external callers can also trigger them.
+  Exposes ``start_charging()`` and ``stop_charging()`` commands that map to
+  ``handle_start_charging()`` and ``handle_stop_charging()``. The state machine calls
+  these internally; external callers may also invoke them.
+
+``can_signals`` (``can_signal_receiver``)
+  Publishes two variables:
+
+  - ``can_frame`` — raw CAN frame forwarded on every received EV frame.
+  - ``power_request`` — published every loop tick during charging and once on stop.
+    Fields: ``voltage_V`` (float), ``current_A`` (float), ``charge_mode`` (int, always 0).
+
+  The ``init()`` and ``ready()`` implementations are no-ops; all publishing is driven by
+  the parent module.
 
 Requires
-~~~~~~~~
-
-``power_supply`` (``power_supply_DC``)
-  Used to control the DC output:
-
-  - ``call_setMode(Export, Charging)`` — enables output
-  - ``call_setExportVoltageCurrent(V, I)`` — sets voltage/current setpoint
-  - ``call_setMode(Off, Other)`` — disables output on stop/fault
+--------
 
 ``bsp`` (``evse_board_support``)
-  Used for contactor and enable control:
+  Used for EVSE enable/disable and contactor control:
 
-  - ``call_enable(true/false)`` — enables/disables the EVSE
-  - ``call_allow_power_on({allow_power_on: true/false})`` — closes/opens contactors
+  - ``call_enable(true)`` — called on EV detection
+  - ``call_enable(false)`` — called on unplug detection
+  - ``call_allow_power_on({allow_power_on: true})`` — closes contactors / asserts IN2
+  - ``call_allow_power_on({allow_power_on: false})`` — opens contactors on stop/fault
+
+``can_bus`` (``CANBus``)
+  Raw CAN bus access. Exactly one connection required (``min_connections: 1``,
+  ``max_connections: 1``).
+
+  - ``call_open("main_mcan0")`` — opens the interface on init (interface name is
+    hardcoded in ``chademoImpl.cpp``, not read from config)
+  - ``call_send(id, extended, dlc, data)`` — transmits 0x108 and 0x109 frames
+  - ``subscribe_last_frame(callback)`` — receives all EV frames
+
+  .. note::
+     The CAN interface name ``"main_mcan0"`` is hardcoded in ``chademoImpl::init()``
+     and is not driven by any configuration parameter, despite the intent suggested by
+     the ``can_interface`` config key described in some documentation. The config
+     key does not exist in ``manifest.yaml``.
 
 Configuration
--------------
+=============
 
 .. list-table::
    :header-rows: 1
+   :widths: 30 15 15 40
 
    * - Parameter
      - Type
      - Default
      - Description
-   * - ``can_interface``
-     - string
-     - ``main_mcan0``
-     - SocketCAN interface name
-   * - ``bitrate``
-     - integer
-     - ``500000``
-     - CAN bus bitrate in bps
    * - ``max_voltage_limit``
      - number
      - ``500.0``
-     - Maximum output voltage advertised to EV (V)
+     - Maximum output voltage advertised to the EV in 0x108 and 0x109 (V)
    * - ``max_current_limit``
      - number
      - ``50.0``
-     - Maximum output current advertised to EV (A)
+     - Maximum output current advertised to the EV in 0x108 and 0x109 (A)
    * - ``publish_interval_ms``
      - integer
      - ``100``
-     - State machine loop interval in milliseconds
+     - State machine loop interval (ms). Controls CAN heartbeat rate and ramp step rate.
    * - ``presence_gpio_chip``
      - integer
      - ``2``
-     - GPIO chip index for EV presence detection (e.g. ``/dev/gpiochip2``)
+     - GPIO chip index for EV presence detection (used to build ``/dev/gpiochipN``)
    * - ``presence_gpio_line``
      - integer
      - ``36``
      - GPIO line number for EV presence detection
 
-Safety Features
----------------
-
-**CAN Watchdog**
-  If no CAN frame is received from the EV for 1 second during an active session,
-  the module triggers an emergency stop::
-
-    Emergency: CAN Timeout (1s). Car disconnected or crashed.
-
-**EV Fault Detection**
-  If the EV sets the overtemperature/fault bit in frame 0x102 (byte 4 = 0x01),
-  the module immediately transitions to ``FAULT`` state and stops charging.
-
-**GPIO Presence Check**
-  EV presence is detected by reading a GPIO pin via ``gpioget``. The pin going
-  LOW indicates the EV is connected. If the pin goes HIGH during ``WAIT_FOR_EV_100``,
-  the session is reset.
+.. note::
+   There is no ``can_interface`` or ``bitrate`` config parameter in ``manifest.yaml``.
+   The CAN interface name is hardcoded as ``"main_mcan0"`` in the implementation.
 
 Key Log Messages
-----------------
+================
 
 .. list-table::
    :header-rows: 1
+   :widths: 55 45
 
    * - Log message
      - Meaning
+   * - ``CHAdeMO Module Initialized — using CanBus module for CAN``
+     - init() complete, CAN subscription set up
    * - ``Vehicle Detected via /dev/gpiochipX``
-     - EV plug-in detected via GPIO
+     - GPIO pin LOW detected, EV present
    * - ``RX 0x100: EV Req 300V, 20A``
-     - EV sent its target voltage and current
-   * - ``RX 0x101 Data: [...] | SOC: 55%``
-     - EV battery status received with raw bytes
+     - EV sent target voltage and current
+   * - ``Scaling Power Supply to match EV Battery Voltage...``
+     - Transition from WAIT_FOR_EV_100 to PRECHARGE
+   * - ``RX 0x101 Data: [xx xx ...] | SOC: 55%``
+     - EV battery status with raw hex bytes and SoC
    * - ``Signal d1 (Charge Permission) HIGH via BSP``
-     - IN2 asserted, BSP contactors enabled
+     - 0x109 IN2=HIGH sent, BSP contactor asserted
+   * - ``BSP Power-On command sent once.``
+     - Deduplicated BSP power-on in WAIT_FOR_102
    * - ``Relays Closed. Commencing Power Delivery.``
-     - EV confirmed contactors closed (0x102), charging begins
-   * - ``>>> [POWER UPDATE] <<< Target: 6 kW / Actual: 2.1 kW``
-     - Periodic ramp progress log (every 2 seconds)
+     - 0x102 contactors-closed bit received, transitioning to CHARGING_OPERATIONAL
+   * - ``[CHAdeMO] Published power_request: 50V / 20A``
+     - power_request published to EvseManager (ramp in progress)
+   * - ``>>> [POWER UPDATE] <<< Target: 6 kW / Actual: 0.25 kW``
+     - Periodic ramp progress (logged every 2 seconds)
    * - ``!!! TARGET REACHED !!! Final Power: 6 kW at 300V``
-     - Voltage ramp complete, target reached
+     - Ramp complete, transitioning to FINISHED
    * - ``Shutting down DC Power Supply.``
-     - Stop sequence initiated
+     - Stop sequence started
    * - ``Physical Contactors OPENED via BSP.``
-     - Session fully terminated
+     - BSP allow_power_on(false) called, session fully terminated
+   * - ``Emergency: CAN Timeout (1s). Car disconnected or crashed.``
+     - CAN watchdog fired, transitioning to FAULT
+   * - ``EV reported Overtemp/Fault!``
+     - 0x102 fault flag set, transitioning to FAULT
+   * - ``Plug removed! Resetting.``
+     - GPIO pin HIGH during WAIT_FOR_EV_100, unplug detected
 
-Power Supply Module — InfyPower BEG1K075G
-------------------------------------------
+Example Configuration
+=====================
 
-The ``InfyPower_BEG1K075G`` module is the hardware driver for the InfyPower BEG1K075G
-AC/DC power supply. It communicates with the physical unit over a dedicated CAN bus
-using a proprietary protocol (``can_driver_acdc``).
+``config/chademo_config.yaml``:
 
-Capabilities:
+.. code-block:: yaml
 
-- Max export: 1000V / 73.3A / 22 kW
-- Min export: 200V / 1A
-- Bidirectional (supports V2G import mode)
-- Conversion efficiency: 95% export, 95% import
+    active_modules:
+      chademo:
+        module: Chademo
+        config_module:
+          max_voltage_limit: 500
+          max_current_limit: 50
+          publish_interval_ms: 100
+          presence_gpio_chip: 2
+          presence_gpio_line: 36
+        connections:
+          bsp:
+            - implementation_id: board_support
+              module_id: Yeti
+          can_bus:
+            - implementation_id: can_bus
+              module_id: CanBusHW
 
-The driver translates EVerest ``power_supply_DC`` interface calls into CAN commands:
+      CanBusHW:
+        module: CanBus
+        config_module:
+          interface: main_mcan0
+          bitrate: 500000
 
-.. list-table::
-   :header-rows: 1
-
-   * - EVerest call
-     - Hardware action
-   * - ``setMode(Export)``
-     - ``switch_on_off(true)`` + ``set_inverter_mode(false)``
-   * - ``setMode(Import)``
-     - ``set_inverter_mode(true)`` + ``switch_on_off(true)``
-   * - ``setMode(Off)``
-     - ``switch_on_off(false)``
-   * - ``setExportVoltageCurrent(V, I)``
-     - ``set_voltage_current(V, I)`` via CAN
-   * - ``setImportVoltageCurrent(V, I)``
-     - ``set_voltage_current(V, I)`` via CAN
-
-Log output during ramp::
-
-    DCSupply :: Updating voltage/current via CAN: 10V / 20A
-    DCSupply :: Updating voltage/current via CAN: 15V / 20A
-    ...
-    DCSupply :: Updating voltage/current via CAN: 300V / 20A
+      Yeti:
+        module: YetiSimulator
+        config_module:
+          connector_id: 1
 
 EV Simulator — ev_chademo
---------------------------
+==========================
 
 A standalone CHAdeMO EV simulator is provided at ``ev_chademo/``. It runs on a
 separate board (e.g. ruggedboard-imx6ul) connected to the same CAN bus.
-
-Files:
-
-- ``main.cpp`` — entry point, CAN socket setup, main loop
-- ``chademo.cpp`` — CHAdeMO EV-side state machine
-- ``chademo.h`` — state definitions, data structures, CAN IDs
 
 EV State Machine (``CHADEMOSTATE``):
 
 .. code-block:: text
 
     STOPPED
-      │  IN1 detected (0x108 with IN1=HIGH received)
+      │  IN1 detected (0x108 received with IN1=HIGH)
       ▼
     STARTUP → SEND_INITIAL_PARAMS
       │  Sends 0x100 (target V/I), 0x101 (SOC), 0x102 (status)
       ▼
     SET_CHARGE_BEGIN
-      │  Log: "[EV] EVSE Compatible. Setting OUT1 (Car Ready)."
+      │  "[EV] EVSE Compatible. Setting OUT1 (Car Ready)."
       ▼
     WAIT_FOR_BEGIN_CONFIRMATION
       │  Waits for IN2=HIGH in 0x109
-      │  Log: "[RX 0x109] Permission: YES (IN2 HIGH)"
+      │  "[RX 0x109] Permission: YES (IN2 HIGH)"
       ▼
     RUNNING
       │  Sends periodic 0x100/0x101/0x102 at 100ms
-      │  Prints charging status every 2 seconds:
-      │    Voltage: X V / Current: Y A / Power: Z kW / SOC: N%
-      │  Stops when IN2 goes LOW
+      │  Charging status printed every 2 seconds
+      │  Stops when IN2 goes LOW (EVSE revokes permission)
       ▼
     CEASE_CURRENT
-      │  Log: "[EV] EVSE Revoked Permission (IN2=0). Stopping Charge..."
-      │  Log: "[EV] Target reached or EVSE Stop. Opening Contactors."
+      │  "[EV] EVSE Revoked Permission (IN2=0). Stopping Charge..."
       ▼
     (session complete)
 
-Default EV parameters (set in ``main.cpp``):
+Default EV parameters:
 
 .. list-table::
    :header-rows: 1
+   :widths: 40 60
 
    * - Parameter
      - Value
@@ -328,77 +512,45 @@ To build and run::
     g++ -o chademo_test main.cpp chademo.cpp -lpthread
     ./chademo_test
 
-Configuration File
-------------------
-
-``config/chademo_config.yaml``:
-
-.. code-block:: yaml
-
-    active_modules:
-      chademo:
-        module: Chademo
-        config_module:
-          can_interface: "main_mcan0"
-          bitrate: 500000
-          max_voltage_limit: 500
-          max_current_limit: 50
-          presence_gpio_chip: 2
-          presence_gpio_line: 36
-        connections:
-          bsp:
-            - implementation_id: board_support
-              module_id: Yeti
-          power_supply:
-            - implementation_id: main
-              module_id: DCSupply
-
-      DCSupply:
-        module: InfyPower_BEG1K075G
-        config_module:
-          can_device: main_mcan0
-
-      Yeti:
-        module: YetiSimulator
-        config_module:
-          connector_id: 1
-
 Hardware Setup
---------------
+==============
 
 .. code-block:: text
 
-    phyboard-lyra-am62xx (EVSE)          ruggedboard-imx6ul (EV Simulator)
-    ┌─────────────────────────┐           ┌──────────────────────────┐
-    │  EVerest                │           │  ev_chademo              │
-    │  ├─ Chademo module      │           │  └─ chademo_test binary  │
-    │  ├─ InfyPower driver    │           └──────────┬───────────────┘
-    │  └─ YetiSimulator       │                      │
-    │                         │           CAN bus (can0 / main_mcan0)
-    │  main_mcan0 ────────────┼───────────────────────┘
-    │  gpiochip2 line 36 ─────┼── EV presence wire
-    └─────────────────────────┘
+    phyboard-lyra-am62xx (EVSE)              ruggedboard-imx6ul (EV Simulator)
+    ┌──────────────────────────────┐          ┌────────────────────────────┐
+    │  EVerest                     │          │  ev_chademo                │
+    │  ├─ Chademo module           │          │  └─ chademo_test binary    │
+    │  ├─ CanBus module (mcan0)    │          └──────────┬─────────────────┘
+    │  └─ YetiSimulator (BSP)      │                     │
+    │                              │    CAN bus (main_mcan0 / can0)
+    │  main_mcan0 ─────────────────┼─────────────────────┘
+    │  gpiochip2 line 36 ──────────┼─── EV presence signal (active LOW)
+    └──────────────────────────────┘
 
 Files
------
+=====
 
 .. list-table::
    :header-rows: 1
+   :widths: 50 50
 
    * - File
      - Description
    * - ``modules/EVSE/Chademo/manifest.yaml``
      - Module manifest — interfaces, config schema
    * - ``modules/EVSE/Chademo/Chademo.hpp/cpp``
-     - Module class — wires init/ready to implementation
-   * - ``modules/EVSE/Chademo/main/chademoImpl.hpp/cpp``
-     - CHAdeMO state machine, CAN TX/RX, PSU/BSP control
-   * - ``modules/HardwareDrivers/PowerSupplies/InfyPower_BEG1K075G/``
-     - InfyPower hardware driver (CAN-based AC/DC PSU)
+     - Module class — init/ready delegate to p_main and p_can_signals
+   * - ``modules/EVSE/Chademo/main/chademoImpl.hpp``
+     - EVSE state machine, CAN handler declarations, atomic signal variables
+   * - ``modules/EVSE/Chademo/main/chademoImpl.cpp``
+     - Full state machine, CAN TX/RX, BSP control, power_request publishing
+   * - ``modules/EVSE/Chademo/can_signals/can_signal_receiverImpl.hpp/cpp``
+     - can_signal_receiver interface stub (init/ready are no-ops)
    * - ``config/chademo_config.yaml``
      - EVerest configuration for CHAdeMO charging
    * - ``ev_chademo/main.cpp``
-     - EV simulator entry point
+     - EV simulator entry point and default parameters
    * - ``ev_chademo/chademo.cpp``
      - EV-side CHAdeMO state machine
    * - ``ev_chademo/chademo.h``

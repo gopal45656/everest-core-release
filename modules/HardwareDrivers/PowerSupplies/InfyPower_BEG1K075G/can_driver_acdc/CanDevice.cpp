@@ -60,6 +60,18 @@ bool CanDevice::open_device(const char* dev) {
         int sndbuf = 65536;
         setsockopt(can_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
+        // Increase socket RX buffer so replies from modules aren't dropped
+        // when the bus is busy.
+        int rcvbuf = 65536;
+        setsockopt(can_fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+
+        // Keep loopback enabled (default) so we receive frames sent by other
+        // local processes (e.g. the PSU simulator running on the same board).
+        // Disable only reception of our OWN transmitted frames to reduce RX
+        // queue pressure without blocking simulator replies.
+        int recv_own = 0;
+        setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &recv_own, sizeof(recv_own));
+
         // spawn read thread
         exit_rx_thread = false;
         rx_thread_handle = std::thread(&CanDevice::rx_thread, this);
@@ -112,6 +124,7 @@ bool CanDevice::_tx(uint32_t can_id, const std::vector<uint8_t>& payload) {
     frame.can_dlc = payload.size();
     memcpy(frame.data, payload.data(), payload.size());
 
+    std::lock_guard<std::mutex> lock(tx_mutex);
     if (write(can_fd, &frame, sizeof(can_frame)) != sizeof(can_frame)) {
         throw std::runtime_error(std::string("Failed to send can packet :") + strerror(errno));
         return false;

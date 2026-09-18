@@ -6,6 +6,9 @@
 #include <functional>
 #include <optional>
 #include <thread>
+#include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <utils/date.hpp>
 #include <utils/yaml_loader.hpp>
 
@@ -270,6 +273,21 @@ bool powermeterImpl::assign_register_data(const json& registers, const Powermete
                 data.exponent_register_function = this->select_modbus_function(
                     (const uint8_t)registers.at(register_selector).at("function_code_exp_reg"));
                 data.multiplier = registers.at(register_selector).at("multiplier");
+                if (registers.at(register_selector).contains("data_format")) {
+                    const std::string requested_format = registers.at(register_selector).at("data_format");
+                    if (requested_format == "uint16") {
+                        data.data_format = DATA_FORMAT_UINT16;
+                    } else if (requested_format == "float32" || requested_format == "float") {
+                        data.data_format = DATA_FORMAT_FLOAT32;
+                    } else {
+                        throw std::runtime_error(fmt::format("Unsupported data format '{}' for register '{}'",
+                                                             requested_format, register_selector));
+                    }
+                } else if (data.num_registers == 1) {
+                    data.data_format = DATA_FORMAT_UINT16;
+                } else {
+                    data.data_format = DATA_FORMAT_FLOAT32;
+                }
                 this->pm_configuration.push_back(data);
             }
             if (registers.at(register_selector).contains("L1")) {
@@ -310,6 +328,21 @@ void powermeterImpl::assign_register_sublevel_data(const json& registers, const 
     sublevel_data.exponent_register_function = this->select_modbus_function(
         (const uint8_t)registers.at(register_selector).at(sublevel_selector).at("function_code_exp_reg"));
     sublevel_data.multiplier = registers.at(register_selector).at(sublevel_selector).at("multiplier");
+    if (registers.at(register_selector).at(sublevel_selector).contains("data_format")) {
+        const std::string requested_format = registers.at(register_selector).at(sublevel_selector).at("data_format");
+        if (requested_format == "uint16") {
+            sublevel_data.data_format = DATA_FORMAT_UINT16;
+        } else if (requested_format == "float32" || requested_format == "float") {
+            sublevel_data.data_format = DATA_FORMAT_FLOAT32;
+        } else {
+            throw std::runtime_error(fmt::format("Unsupported data format '{}' for register '{}'::{}",
+                                                 requested_format, register_selector, sublevel_selector));
+        }
+    } else if (sublevel_data.num_registers == 1) {
+        sublevel_data.data_format = DATA_FORMAT_UINT16;
+    } else {
+        sublevel_data.data_format = DATA_FORMAT_FLOAT32;
+    }
     this->pm_configuration.push_back(sublevel_data);
 }
 
@@ -355,23 +388,55 @@ bool powermeterImpl::read_register(const RegisterData& register_config) {
     std::optional<types::serial_comm_hub_requests::Result> exponent_response;
 
     if (register_config.start_register_function == READ_HOLDING_REGISTER) {
+        EVLOG_info << fmt::format("Transmitting Modbus request: device={} fn={} start={} count={}",
+                                  this->config.powermeter_device_id,
+                                  this->modbus_function_to_string(register_config.start_register_function),
+                                  register_config.start_register,
+                                  register_config.num_registers);
         register_response = mod->r_serial_comm_hub->call_modbus_read_holding_registers(
             this->config.powermeter_device_id, register_config.start_register, register_config.num_registers);
     } else if (register_config.start_register_function == READ_INPUT_REGISTER) {
+        EVLOG_info << fmt::format("Transmitting Modbus request: device={} fn={} start={} count={}",
+                                  this->config.powermeter_device_id,
+                                  this->modbus_function_to_string(register_config.start_register_function),
+                                  register_config.start_register - this->config.modbus_base_address,
+                                  register_config.num_registers);
         register_response = mod->r_serial_comm_hub->call_modbus_read_input_registers(
             this->config.powermeter_device_id, register_config.start_register - this->config.modbus_base_address,
             register_config.num_registers);
     }
 
+    EVLOG_info << fmt::format("Received Modbus response: device={} fn={} status={} values={}",
+                              this->config.powermeter_device_id,
+                              this->modbus_function_to_string(register_config.start_register_function),
+                              status_code_enum_to_string(register_response.status_code),
+                              this->dump_response_values(register_response));
+
     if (register_config.exponent_register != 0) {
         if (register_config.exponent_register_function == READ_HOLDING_REGISTER) {
+            EVLOG_info << fmt::format("Transmitting Modbus exponent request: device={} fn={} start={} count={}",
+                                      this->config.powermeter_device_id,
+                                      this->modbus_function_to_string(register_config.exponent_register_function),
+                                      register_config.exponent_register,
+                                      register_config.num_registers);
             exponent_response = mod->r_serial_comm_hub->call_modbus_read_holding_registers(
                 this->config.powermeter_device_id, register_config.exponent_register, register_config.num_registers);
         } else if (register_config.exponent_register_function == READ_INPUT_REGISTER) {
+            EVLOG_info << fmt::format("Transmitting Modbus exponent request: device={} fn={} start={} count={}",
+                                      this->config.powermeter_device_id,
+                                      this->modbus_function_to_string(register_config.exponent_register_function),
+                                      register_config.exponent_register - this->config.modbus_base_address,
+                                      register_config.num_registers);
             exponent_response = mod->r_serial_comm_hub->call_modbus_read_input_registers(
                 this->config.powermeter_device_id, register_config.exponent_register - this->config.modbus_base_address,
                 register_config.num_registers);
         }
+
+        EVLOG_info << fmt::format("Received Modbus exponent response: device={} fn={} status={} values={}",
+                                  this->config.powermeter_device_id,
+                                  this->modbus_function_to_string(register_config.exponent_register_function),
+                                  types::serial_comm_hub_requests::status_code_enum_to_string(exponent_response->status_code),
+                                  this->dump_response_values(*exponent_response));
         return this->process_response(register_config, std::move(register_response), std::move(exponent_response));
     } else {
         // no exponent
@@ -548,21 +613,79 @@ bool powermeterImpl::process_response(
 
 float powermeterImpl::merge_register_values_into_element(const RegisterData& reg_data, const int16_t exponent,
                                                          const types::serial_comm_hub_requests::Result& reg_message) {
-    uint32_t value{0};
     const auto& reg_value = reg_message.value.value();
-    if (reg_data.num_registers == 1 && reg_value.size() == 1) {
-        value = reg_value.at(0);
-    } else if (reg_data.num_registers == 2 && reg_value.size() == 2) {
-        value += reg_value.at(0) << 16;
-        value += reg_value.at(1);
+
+    float val{0.0f};
+    uint32_t raw_u32{0};
+
+    if (reg_data.data_format == DATA_FORMAT_UINT16) {
+        if (reg_data.num_registers != 1 || reg_value.size() != 1) {
+            throw std::runtime_error("UINT16 data format requires exactly one register");
+        }
+        raw_u32 = reg_value.at(0);
+        val = static_cast<float>(raw_u32);
     } else {
-        throw std::runtime_error("Values of more than 2 registers in size are currently not supported!");
+        if (reg_data.num_registers == 1 && reg_value.size() == 1) {
+            raw_u32 = reg_value.at(0);
+        } else if (reg_data.num_registers == 2 && reg_value.size() == 2) {
+            raw_u32 += reg_value.at(1) << 16;
+            raw_u32 += reg_value.at(0);
+        } else {
+            throw std::runtime_error("Values of more than 2 registers in size are currently not supported!");
+        }
+
+        val = *reinterpret_cast<float*>(&raw_u32);
     }
 
-    const auto val = *reinterpret_cast<float*>(&value);
     const auto val_scaled = float(val * reg_data.multiplier * pow(10.0, exponent));
 
+    EVLOG_info << fmt::format("Register parse: type={} raw_hex=0x{:08x} raw_float={} multiplier={} exponent={} result={}",
+                              this->powermeter_register_type_to_string(reg_data.type),
+                              raw_u32,
+                              val,
+                              reg_data.multiplier,
+                              exponent,
+                              val_scaled);
+
     return val_scaled;
+}
+
+std::string powermeterImpl::modbus_function_to_string(ModbusFunctionType function_type) const {
+    switch (function_type) {
+    case READ_HOLDING_REGISTER:
+        return "READ_HOLDING_REGISTER";
+    case READ_INPUT_REGISTER:
+        return "READ_INPUT_REGISTER";
+    default:
+        return "REGISTER_TYPE_UNDEFINED";
+    }
+}
+
+std::string powermeterImpl::powermeter_register_type_to_string(PowermeterRegisters r) const {
+    if (r == ENERGY_WH_IMPORT_TOTAL) return "ENERGY_WH_IMPORT_TOTAL";
+    if (r == ENERGY_WH_IMPORT_L1) return "ENERGY_WH_IMPORT_L1";
+    if (r == POWER_W_TOTAL) return "POWER_W_TOTAL";
+    if (r == VOLTAGE_V_L1) return "VOLTAGE_V_L1";
+    if (r == CURRENT_A_L1) return "CURRENT_A_L1";
+    if (r == FREQUENCY_HZ_L1) return "FREQUENCY_HZ_L1";
+    return "OTHER";
+}
+
+std::string powermeterImpl::dump_response_values(const types::serial_comm_hub_requests::Result& response) const {
+    std::stringstream ss;
+
+    if (response.value) {
+        for (size_t i = 0; i < response.value->size(); i++) {
+            if (i != 0)
+                ss << ", ";
+            ss << "0x" << std::uppercase << std::setw(4) << std::setfill('0') << std::hex
+               << int(response.value.value()[i]);
+        }
+    } else {
+        ss << "<none>";
+    }
+
+    return ss.str();
 }
 
 void powermeterImpl::output_error_with_content(const types::serial_comm_hub_requests::Result& response) {
