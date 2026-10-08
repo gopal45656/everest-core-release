@@ -1,0 +1,29 @@
+description: Register user NFC token UIDs from a DWIN display and store them locally.
+provides:
+  main:
+    interface: empty
+    description: Handles DWIN-triggered user token registration.
+    config:
+      display_serial_port:
+        description: Serial port connected to the DWIN display.
+        type: string
+        default: /dev/ttyCH9344USB2
+      display_baud_rate:
+        description: Baud rate used by the DWIN display.
+        type: integer
+        minimum: 9600
+        maximum: 230400
+        default: 115200
+      uid_file:
+        description: Local file where registered UIDs are appended, one per line.
+        type: string
+        default: /var/lib/everest/user-registration-uids.txt
+requires:
+  token_provider:
+    interface: auth_token_provider
+    min_connections: 1
+    max_connections: 1
+metadata:
+  license: https://opensource.org/licenses/Apache-2.0
+  authors:
+    - EVerest contributors
