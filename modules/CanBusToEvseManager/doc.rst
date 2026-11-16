@@ -56,10 +56,16 @@ The module consists of three layers:
 GB/T 27930 Protocol State Machine
 ==================================
 
-The ``GbtProtocol`` class implements the charger side of GB/T 27930. It handles all BMS
-messages and generates the corresponding charger responses.
+The ``GbtProtocol`` class (``GbtProtocol.hpp``) implements the charger side of GB/T 27930. It
+handles all BMS messages and generates the corresponding charger responses.
 
-State sequence:
+The state machine defines the following states (``GbtProtocol::State`` enum):
+
+.. code-block:: text
+
+    Idle → Handshake → Recognition → Config → Charging → Stopping → Finished
+
+State sequence and transitions:
 
 .. code-block:: text
 
@@ -67,62 +73,80 @@ State sequence:
       │  BHM received (BMS handshake)
       ▼
     Handshake  ──TX──► CHM (charger announces max V/I)
-      │  BCP received (battery parameters) — BRM optional
+      │  BRM received (optional) → TX CRM → Recognition
+      │  BCP received (BRM skipped) → TX CRM → (falls through to Config)
       ▼
-    Recognition / Config  ──TX──► CRM + CTS + CML + CRO
-      │  Auto-transitions to Charging (BRO not required by all BMS)
+    Recognition
+      │  BCP received (battery parameters)
       ▼
-    Charging  ◄──► BCL/BCS loop
-      │  BST received (BMS stop request)
+    Config  ──TX──► CTS + CML + CRO
+      │  Auto-transitions directly to Charging (BRO not required)
+      │  BCL/BCS accepted here too (BMS may start before BRO)
       ▼
-    Stopping  ──TX──► CST
-      │  BSD received (session statistics)
+    Charging  ◄──► BCL/BCS loop  ──TX──► CCS (echo per BCL)
+      │  BST received (BMS stop request)  ──TX──► CST
       ▼
-    Finished  ──TX──► CSD
+    Stopping
+      │  BSD received (session statistics)  ──TX──► CSD
+      ▼
+    Finished
 
-BRM handling note: some BMS implementations skip BRM and go directly from BHM to BCP. The
-state machine handles this gracefully by sending CRM when BCP arrives in Handshake state.
+**BRM skipped:** some BMS implementations go directly from BHM to BCP without sending BRM.
+When BCP arrives in ``Handshake`` state, the machine logs a warning, sends CRM immediately,
+then processes BCP normally.
 
-Similarly, some BMS implementations skip BRO and go straight from BCP to BCL. The state machine
-auto-transitions to Charging after sending CRO during Config, so BCL frames are accepted even
-without an explicit BRO.
+**BRO skipped:** after sending CRO the machine auto-transitions to ``Charging`` without
+waiting for BRO. If BRO does arrive (strict BMS), it is accepted in ``Config`` state and
+causes a second CRO, but the machine is already in ``Charging`` so the duplicate is harmless.
+
+**BCL/BCS in Config state:** ``handle_bcl`` and ``handle_bcs`` accept frames in both
+``Charging`` and ``Config`` states, so a BMS that starts its demand loop before BRO is
+handled correctly.
 
 Message Mapping
 ---------------
 
-+--------+----------------------------------------+--------+------------------------------------------+
-| BMS TX | Description                            | EVSE TX| Description                              |
-+========+========================================+========+==========================================+
-| BHM    | BMS handshake                          | CHM    | Charger handshake (max V/I/type)         |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BRM    | Battery recognition (optional)         | CRM    | Charger recognition (ready + status)     |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BCP    | Battery charge parameters              | CTS    | Estimated charge time (fixed: 3600s)     |
-+--------+----------------------------------------+--------+------------------------------------------+
-|        |                                        | CML    | Charger mode (CC = 1)                    |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BRO    | BMS ready for output (optional)        | CRO    | Charger ready to output                  |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BCL    | Battery charge demand (V/I loop)       | CCS    | Charger charge status (echo of setpoint) |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BCS    | Battery charge status (V/I/SoC/temp)   |        |                                          |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BSM    | Battery temperature status (max/min)   |        |                                          |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BMV    | Battery min/max cell voltage           |        | (logged, not acted upon)                 |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BMT    | Battery min/max cell temperature       |        | (logged, not acted upon)                 |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BSP    | BMS stop preparation                   |        | (logged, not acted upon)                 |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BST    | BMS stop transmission                  | CST    | Charger stop transmission                |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BSD    | BMS session statistics                 | CSD    | Charger session statistics               |
-+--------+----------------------------------------+--------+------------------------------------------+
-| BEM    | BMS error message                      | CST    | Charger stop (fault, with fault code)    |
-+--------+----------------------------------------+--------+------------------------------------------+
-|        |                                        | CEM    | Charger error message (defined in DBC)   |
-+--------+----------------------------------------+--------+------------------------------------------+
+All frames use 29-bit extended CAN IDs. IDs are defined in ``gbt27930.h`` (generated by
+cantools v41.2.1 on 2026-03-13).
+
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BMS TX | Frame ID   | Description                            | EVSE TX| Frame ID   | Description                              |
++========+============+========================================+========+============+==========================================+
+| BHM    | 0x182756F4 | BMS handshake                          | CHM    | 0x1826F456 | Charger handshake (max V/I/type)         |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BRM    | 0x1C0256F4 | Battery recognition (optional)         | CRM    | 0x1801F456 | Charger recognition (ready + status)     |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BCP    | 0x1C0656F4 | Battery charge parameters              | CTS    | 0x1807F456 | Estimated charge time (fixed: 3600 s)    |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+|        |            |                                        | CML    | 0x1808F456 | Charger mode (CC = 1)                    |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BRO    | 0x100956F4 | BMS ready for output (optional)        | CRO    | 0x100AF456 | Charger ready to output                  |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BCL    | 0x181056F4 | Battery charge demand (V/I loop)       | CCS    | 0x1812F456 | Charger charge status (echo of setpoint) |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BCS    | 0x1C1156F4 | Battery charge status (V/I/SoC/temp)   |        |            |                                          |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BSM    | 0x181356F4 | Battery temperature status (max/min)   |        |            |                                          |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BMV    | 0x1C1556F4 | Battery min/max cell voltage           |        |            | (logged, not acted upon)                 |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BMT    | 0x1C1656F4 | Battery min/max cell temperature       |        |            | (logged, not acted upon)                 |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BSP    | 0x1C1756F4 | BMS stop preparation                   |        |            | (not handled; no handler in state machine)|
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BST    | 0x101956F4 | BMS stop transmission                  | CST    | 0x101AF456 | Charger stop transmission                |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BSD    | 0x181C56F4 | BMS session statistics                 | CSD    | 0x181DF456 | Charger session statistics               |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+| BEM    | 0x081E56F4 | BMS error message                      | CST    | 0x101AF456 | Charger stop (fault, with fault code)    |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+|        |            |                                        | CEM    | 0x081FF456 | Charger error message (defined in DBC)   |
++--------+------------+----------------------------------------+--------+------------+------------------------------------------+
+
+.. note::
+   BSP (0x1C1756F4) is not handled by ``GbtProtocol::on_frame`` — there is no ``GBT27930_BSP_FRAME_ID``
+   case in the switch statement, so it passes through silently. The doc.rst description
+   "logged, not acted upon" does not apply; the frame is simply ignored.
 
 Hardcoded Charger Parameters
 -----------------------------
@@ -160,10 +184,12 @@ Provides
 ``can_signals`` (``can_signal_receiver``)
   Publishes two variables to connected modules (typically ``EvseManager``):
 
-  - ``can_frame`` — the raw CAN frame object forwarded on every received frame, containing
-    ``id`` (uint32), ``extended`` (bool), ``dlc`` (int), and ``data`` (byte array).
-  - ``power_request`` — decoded BCL data published every time a BCL frame arrives during the
-    Charging state. Fields:
+  - ``can_frame`` — the raw CAN frame object published **unconditionally** for
+    every frame received from the CAN bus (after the state machine has processed
+    it). Fields: ``id`` (uint32), ``extended`` (bool), ``dlc`` (int),
+    ``data`` (byte array).
+  - ``power_request`` — published **only** when a BCL frame arrives and the
+    state machine is in ``Charging`` state. Fields:
 
     .. list-table::
        :header-rows: 1
@@ -208,12 +234,22 @@ Configuration
 EvseManager Integration
 =======================
 
+.. note::
+   This section describes the **consumer side** — behaviour that lives in ``EvseManager``,
+   not in ``CanBusToEvseManager`` itself. It is included here as a usage guide.
+
 ``EvseManager`` was extended to optionally require the ``can_signal_receiver`` interface.
 When connected, it subscribes to two vars:
 
 ``can_frame``
   Logs every received CAN frame. Also detects BST (frame ID ``0x101956F4``) to trigger
   ``powersupply_DC_off()``.
+
+  .. note::
+     BST is also handled inside ``GbtProtocol::handle_bst()`` — the state machine
+     transitions to ``Stopping`` and transmits ``CST`` independently of whatever
+     EvseManager does with the raw ``can_frame`` signal. Both paths run; they are not
+     mutually exclusive.
 
 ``power_request``
   On every BCL-derived power request:
@@ -330,7 +366,7 @@ Files
    * - ``modules/CanBusToEvseManager/GbtProtocol.hpp``
      - GB/T 27930 charger-side state machine (header-only)
    * - ``modules/CanBusToEvseManager/gbt27930.h``
-     - DBC-generated codec header (cantools v41.2.1), all message structs and encode/decode functions
+     - DBC-generated codec header (cantools v41.2.1, generated 2026-03-13), all message structs and encode/decode functions
    * - ``modules/CanBusToEvseManager/gbt27930.c``
      - DBC-generated codec implementation (cantools v41.2.1)
    * - ``modules/CanBusToEvseManager/can_signals/can_signal_receiverImpl.hpp``
